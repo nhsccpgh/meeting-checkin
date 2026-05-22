@@ -26,7 +26,7 @@
     header h1 {
       font-size: 1.4rem;
       font-weight: 700;
-      color: #c00;
+      color: #1a1a1a;
     }
 
     header p {
@@ -65,7 +65,7 @@
       transition: border-color .15s;
     }
 
-    input[type="text"]:focus { border-color: #c00; }
+    input[type="text"]:focus { border-color: #c9a84c; }
 
     .toggle {
       display: flex;
@@ -89,9 +89,9 @@
     }
 
     .toggle input:checked + label {
-      background: #c00;
-      color: #fff;
-      border-color: #c00;
+      background: #c9a84c;
+      color: #1a1a1a;
+      border-color: #c9a84c;
     }
 
     button[type="submit"] {
@@ -101,15 +101,15 @@
       padding: 12px;
       font-size: 1rem;
       font-weight: 700;
-      background: #c00;
-      color: #fff;
+      background: #c9a84c;
+      color: #1a1a1a;
       border: none;
       border-radius: 6px;
       cursor: pointer;
       transition: background .15s;
     }
 
-    button[type="submit"]:hover:not(:disabled) { background: #a00; }
+    button[type="submit"]:hover:not(:disabled) { background: #b8943d; }
     button[type="submit"]:disabled { background: #aaa; cursor: default; }
 
     .message {
@@ -119,7 +119,7 @@
       color: #555;
     }
 
-    .message.error { color: #c00; }
+    .message.error { color: #b8400a; }
 
     .roster-list {
       list-style: none;
@@ -151,8 +151,8 @@
       text-align: center;
     }
 
-    #status-msg.ok  { color: #080; }
-    #status-msg.err { color: #c00; }
+    #status-msg.ok  { color: #2a7a2a; }
+    #status-msg.err { color: #b8400a; }
   </style>
 </head>
 <body>
