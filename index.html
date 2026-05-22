@@ -324,7 +324,7 @@ async function submitCheckin() {
 
     if (data.ok) {
       statusMsg.className  = 'ok';
-      statusMsg.textContent = `Checked in as "${name}". See you out there!`;
+      statusMsg.textContent = `Checked in as "${name}".`;
       nameInput.value = '';
       loadRoster();
     } else {
