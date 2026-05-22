@@ -210,19 +210,34 @@ async function loadRoster() {
 
 function schedulePoll() {
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(async () => {
-    try {
-      const res  = await fetch(`${API}?token=${encodeURIComponent(token)}`);
-      const data = await res.json();
-      if (data.ok) {
-        renderRoster(data.checkins);
-        if (data.status === 'open') schedulePoll();
-        else renderForm('closed');
-      }
-    } catch (_) {}
-    if (document.getElementById('roster-card')) schedulePoll();
-  }, POLL_MS);
+  if (document.hidden) return; // pause while tab is backgrounded — saves Apps Script quota
+  pollTimer = setTimeout(pollOnce, POLL_MS);
 }
+
+async function pollOnce() {
+  try {
+    const res  = await fetch(`${API}?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+    if (data.ok) {
+      renderRoster(data.checkins);
+      if (data.status !== 'open') {
+        renderForm('closed');
+        return; // stop polling — meeting is over
+      }
+    }
+  } catch (_) {
+    // network blip — keep trying
+  }
+  schedulePoll();
+}
+
+// Resume polling immediately when the user returns to the tab.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && document.getElementById('roster-card')) {
+    clearTimeout(pollTimer);
+    loadRoster();
+  }
+});
 
 // ── Render helpers ────────────────────────────────────────────────────────────
 
@@ -278,7 +293,8 @@ function renderRoster(checkins) {
     return;
   }
 
-  const items = checkins.map(c =>
+  // Newest first so the person who just checked in sees themselves at the top.
+  const items = checkins.slice().reverse().map(c =>
     `<li><span>${esc(c.name)}</span><span class="source">${esc(c.source)}</span></li>`
   ).join('');
 
