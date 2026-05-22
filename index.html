@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NHSCC Check-In</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f4f4f4;
+      color: #222;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #c00;
+    }
+
+    header p {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.1);
+      padding: 24px;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .card + .card { margin-top: 20px; }
+
+    h2 { font-size: 1.1rem; margin-bottom: 16px; }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 1rem;
+      border: 1.5px solid #ccc;
+      border-radius: 6px;
+      outline: none;
+      transition: border-color .15s;
+    }
+
+    input[type="text"]:focus { border-color: #c00; }
+
+    .toggle {
+      display: flex;
+      border: 1.5px solid #ccc;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 16px;
+    }
+
+    .toggle input { display: none; }
+
+    .toggle label {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      margin: 0;
+      transition: background .15s, color .15s;
+    }
+
+    .toggle input:checked + label {
+      background: #c00;
+      color: #fff;
+      border-color: #c00;
+    }
+
+    button[type="submit"] {
+      display: block;
+      width: 100%;
+      margin-top: 20px;
+      padding: 12px;
+      font-size: 1rem;
+      font-weight: 700;
+      background: #c00;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+
+    button[type="submit"]:hover:not(:disabled) { background: #a00; }
+    button[type="submit"]:disabled { background: #aaa; cursor: default; }
+
+    .message {
+      text-align: center;
+      padding: 32px 16px;
+      font-size: 1rem;
+      color: #555;
+    }
+
+    .message.error { color: #c00; }
+
+    .roster-list {
+      list-style: none;
+      font-size: 0.9rem;
+    }
+
+    .roster-list li {
+      display: flex;
+      justify-content: space-between;
+      padding: 7px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .roster-list li:last-child { border-bottom: none; }
+
+    .roster-list .source {
+      color: #888;
+      font-size: 0.8rem;
+      white-space: nowrap;
+      margin-left: 12px;
+    }
+
+    .roster-empty { color: #aaa; font-size: 0.9rem; font-style: italic; }
+
+    #status-msg {
+      font-size: 0.82rem;
+      margin-top: 10px;
+      min-height: 1.2em;
+      text-align: center;
+    }
+
+    #status-msg.ok  { color: #080; }
+    #status-msg.err { color: #c00; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>NHSCC</h1>
+  <p id="meeting-name">Loading…</p>
+</header>
+
+<div id="main"></div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbxHtqAqLn8EBH3w1cTkbeSkPOTEwA_aE1o7y9GDuum6pNGFzCLb70o1UeLo16OAOBCXxg/exec';
+const POLL_MS = 12000;
+
+const params = new URLSearchParams(location.search);
+const token  = params.get('m');
+const main   = document.getElementById('main');
+const nameEl = document.getElementById('meeting-name');
+
+let pollTimer = null;
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+
+if (!token) {
+  showError('No meeting token in URL. Scan the QR code again.');
+} else {
+  loadRoster();
+}
+
+// ── Roster fetch + render ─────────────────────────────────────────────────────
+
+async function loadRoster() {
+  try {
+    const res  = await fetch(`${API}?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+
+    if (!data.ok) {
+      handleApiError(data.error);
+      return;
+    }
+
+    nameEl.textContent = data.meetingName;
+    document.title     = `NHSCC — ${data.meetingName}`;
+
+    renderForm(data.status);
+    renderRoster(data.checkins);
+
+    if (data.status === 'open') schedulePoll();
+
+  } catch (e) {
+    showError('Could not reach the check-in server. Check your connection.');
+  }
+}
+
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    try {
+      const res  = await fetch(`${API}?token=${encodeURIComponent(token)}`);
+      const data = await res.json();
+      if (data.ok) {
+        renderRoster(data.checkins);
+        if (data.status === 'open') schedulePoll();
+        else renderForm('closed');
+      }
+    } catch (_) {}
+    if (document.getElementById('roster-card')) schedulePoll();
+  }, POLL_MS);
+}
+
+// ── Render helpers ────────────────────────────────────────────────────────────
+
+function renderForm(status) {
+  if (document.getElementById('form-card')) return; // already rendered
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = 'form-card';
+
+  if (status !== 'open') {
+    card.innerHTML = `<p class="message">This meeting is closed. No further check-ins are accepted.</p>`;
+    main.prepend(card);
+    return;
+  }
+
+  card.innerHTML = `
+    <h2>Check In</h2>
+    <label for="name-input">Your name</label>
+    <input type="text" id="name-input" placeholder="First Last" autocomplete="name" autocorrect="off">
+    <div class="toggle">
+      <input type="radio" name="source" id="src-person" value="In person" checked>
+      <label for="src-person">In person</label>
+      <input type="radio" name="source" id="src-zoom" value="Zoom">
+      <label for="src-zoom">Zoom</label>
+    </div>
+    <button type="submit" id="submit-btn">Check In</button>
+    <p id="status-msg"></p>
+  `;
+  main.prepend(card);
+
+  document.getElementById('submit-btn').addEventListener('click', submitCheckin);
+  document.getElementById('name-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitCheckin();
+  });
+}
+
+function renderRoster(checkins) {
+  let card = document.getElementById('roster-card');
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'roster-card';
+    main.appendChild(card);
+  }
+
+  if (!checkins || checkins.length === 0) {
+    card.innerHTML = `<h2>Who's checked in</h2><p class="roster-empty">No one yet — be the first!</p>`;
+    return;
+  }
+
+  const items = checkins.map(c =>
+    `<li><span>${esc(c.name)}</span><span class="source">${esc(c.source)}</span></li>`
+  ).join('');
+
+  card.innerHTML = `<h2>Who's checked in (${checkins.length})</h2><ul class="roster-list">${items}</ul>`;
+}
+
+function showError(msg) {
+  nameEl.textContent = 'NHSCC Check-In';
+  main.innerHTML = `<div class="card"><p class="message error">${esc(msg)}</p></div>`;
+}
+
+function handleApiError(err) {
+  if (/closed/i.test(err))        showError('This meeting is closed.');
+  else if (/not opened/i.test(err)) showError('This meeting hasn\'t opened yet.');
+  else if (/unknown/i.test(err))  showError('Meeting not found. Make sure you scanned the right QR code.');
+  else                            showError(err || 'Something went wrong.');
+}
+
+// ── Check-in submit ───────────────────────────────────────────────────────────
+
+async function submitCheckin() {
+  const nameInput = document.getElementById('name-input');
+  const statusMsg = document.getElementById('status-msg');
+  const submitBtn = document.getElementById('submit-btn');
+  const source    = document.querySelector('input[name="source"]:checked').value;
+  const name      = nameInput.value.trim();
+
+  if (!name) {
+    statusMsg.className = 'err';
+    statusMsg.textContent = 'Please enter your name.';
+    nameInput.focus();
+    return;
+  }
+
+  submitBtn.disabled   = true;
+  statusMsg.className  = '';
+  statusMsg.textContent = 'Submitting…';
+
+  try {
+    const res  = await fetch(API, {
+      method:  'POST',
+      // text/plain avoids CORS preflight — Apps Script doesn't handle OPTIONS
+      headers: { 'Content-Type': 'text/plain' },
+      body:    JSON.stringify({ token, name, source }),
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      statusMsg.className  = 'ok';
+      statusMsg.textContent = `Checked in as "${name}". See you out there!`;
+      nameInput.value = '';
+      loadRoster();
+    } else {
+      statusMsg.className  = 'err';
+      statusMsg.textContent = data.error || 'Check-in failed. Try again.';
+      submitBtn.disabled = false;
+    }
+  } catch (e) {
+    statusMsg.className  = 'err';
+    statusMsg.textContent = 'Network error. Try again.';
+    submitBtn.disabled = false;
+  }
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+
+function esc(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+}
+</script>
+
+</body>
+</html>
