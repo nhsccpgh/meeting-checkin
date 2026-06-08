@@ -50,6 +50,7 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
 | `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
+| `fixMeetingTab()` | Repairs an existing meeting tab — fixes ID text formatting and re-pulls each check-in's barcode/Unique ID from the Members directory by name |
 | `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
 | `syncMembers()` | Fetches the timing-software CSV export from a (remembered, re-promptable) URL and rewrites the Members tab |
 | `setup()` | One-time setup — creates the Meetings index and Members directory tabs with headers |

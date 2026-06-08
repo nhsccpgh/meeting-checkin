@@ -79,6 +79,7 @@ function onOpen() {
     .addItem('Close Meeting',   'closeMeeting')
     .addSeparator()
     .addItem('Show Attendance', 'showAttendance')
+    .addItem('Repair Barcodes', 'fixMeetingTab')
     .addItem('Sync Members',    'syncMembers')
     .addToUi();
 }
@@ -528,12 +529,11 @@ function syncMembers() {
   ui.alert(`Synced ${out.length} members from the CSV.`);
 }
 
-// Organizer view: pick a meeting and see its present barcodes sorted (to scroll
-// alongside the timing software), plus any unmatched names to handle by hand.
-function showAttendance() {
+// Prompt the organizer to choose a meeting. Returns { name, tab } or null.
+function pickMeeting(title) {
   const ui    = SpreadsheetApp.getUi();
   const index = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
-  if (!index) { ui.alert('Meetings tab not found.'); return; }
+  if (!index) { ui.alert('Meetings tab not found.'); return null; }
 
   const data = index.getDataRange().getDisplayValues();
   const meetings = [];
@@ -542,19 +542,82 @@ function showAttendance() {
       meetings.push({ name: data[i][COL.MEETING_NAME - 1], tab: data[i][COL.TAB_NAME - 1] });
     }
   }
-  if (meetings.length === 0) { ui.alert('No meetings yet.'); return; }
+  if (meetings.length === 0) { ui.alert('No meetings yet.'); return null; }
+  if (meetings.length === 1) return meetings[0];
 
-  let meeting;
-  if (meetings.length === 1) {
-    meeting = meetings[0];
-  } else {
-    const list   = meetings.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
-    const result = ui.prompt('Show Attendance', `Meetings:\n${list}\n\nEnter number:`, ui.ButtonSet.OK_CANCEL);
-    if (result.getSelectedButton() !== ui.Button.OK) return;
-    const idx = parseInt(result.getResponseText().trim(), 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= meetings.length) { ui.alert('Invalid selection.'); return; }
-    meeting = meetings[idx];
+  const list   = meetings.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
+  const result = ui.prompt(title, `Meetings:\n${list}\n\nEnter number:`, ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return null;
+  const idx = parseInt(result.getResponseText().trim(), 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= meetings.length) { ui.alert('Invalid selection.'); return null; }
+  return meetings[idx];
+}
+
+// Name → member map from the Members tab, excluding names shared by 2+ members
+// (ambiguous, so we can't safely auto-assign a barcode).
+function membersByName() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
+  const map = {}, dupes = {};
+  if (!sheet || sheet.getLastRow() < 2) return map;
+  const rows = sheet.getDataRange().getDisplayValues();
+  for (let i = 1; i < rows.length; i++) {
+    const key = normName(rows[i][MCOL.NAME - 1]);
+    if (!key) continue;
+    if (map[key]) { dupes[key] = true; continue; }
+    map[key] = memberFromRow(rows[i]);
   }
+  Object.keys(dupes).forEach(k => delete map[k]);
+  return map;
+}
+
+// Repair an existing meeting tab: ensure the headers and text formatting are
+// correct, then re-pull each check-in's Barcode ID and Unique ID from the
+// Members directory by matching on name. Fixes leading-zero loss (83 → 083) and
+// backfills the Unique ID column on tabs created before it existed.
+function fixMeetingTab() {
+  const ui = SpreadsheetApp.getUi();
+  const meeting = pickMeeting('Repair Barcodes');
+  if (!meeting) return;
+
+  const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
+  if (!tab) { ui.alert(`Tab "${meeting.tab}" not found.`); return; }
+
+  // Normalize headers + formatting.
+  tab.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes']]);
+  tab.setFrozenRows(1);
+  tab.getRange(1, 4, tab.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
+
+  const last = tab.getLastRow();
+  if (last < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
+
+  const map     = membersByName();
+  const names   = tab.getRange(2, 2, last - 1, 1).getValues();
+  const current = tab.getRange(2, 4, last - 1, 2).getDisplayValues();
+  const out = [];
+  let matched = 0, corrected = 0, unmatched = 0;
+
+  for (let i = 0; i < names.length; i++) {
+    const m = map[normName(names[i][0])];
+    if (m) {
+      matched++;
+      if (String(current[i][0]).trim() !== m.barcode || String(current[i][1]).trim() !== m.uniqueId) corrected++;
+      out.push([m.barcode, m.uniqueId]);
+    } else {
+      unmatched++;
+      out.push([current[i][0], current[i][1]]); // leave as-is
+    }
+  }
+
+  tab.getRange(2, 4, out.length, 2).setValues(out);
+  ui.alert(`Repaired "${meeting.name}":\n\n${matched} matched to a member\n${corrected} barcode/ID values corrected\n${unmatched} left as-is (not in directory)`);
+}
+
+// Organizer view: pick a meeting and see its present barcodes sorted (to scroll
+// alongside the timing software), plus any unmatched names to handle by hand.
+function showAttendance() {
+  const ui      = SpreadsheetApp.getUi();
+  const meeting = pickMeeting('Show Attendance');
+  if (!meeting) return;
 
   const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
   if (!tab || tab.getLastRow() < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
