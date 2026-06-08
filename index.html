@@ -182,12 +182,17 @@ const main   = document.getElementById('main');
 const nameEl = document.getElementById('meeting-name');
 
 let pollTimer = null;
+let roster    = []; // last-known check-ins, for optimistic updates
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 if (!token) {
   renderCodeEntry();
 } else {
+  // Show the form immediately so people can start typing during the ~1.7s
+  // Apps Script round-trip. loadRoster() corrects this if the meeting is
+  // actually closed or the token is invalid.
+  renderForm('open');
   loadRoster();
 }
 
@@ -313,18 +318,23 @@ document.addEventListener('visibilitychange', () => {
 // ── Render helpers ────────────────────────────────────────────────────────────
 
 function renderForm(status) {
-  if (document.getElementById('form-card')) return; // already rendered
+  const existing = document.getElementById('form-card');
+
+  if (status !== 'open') {
+    // Replace any optimistically-shown form with the closed notice.
+    const card = existing || document.createElement('div');
+    card.className = 'card';
+    card.id = 'form-card';
+    card.innerHTML = `<p class="message">This meeting is closed. No further check-ins are accepted.</p>`;
+    if (!existing) main.prepend(card);
+    return;
+  }
+
+  if (existing) return; // form already shown
 
   const card = document.createElement('div');
   card.className = 'card';
   card.id = 'form-card';
-
-  if (status !== 'open') {
-    card.innerHTML = `<p class="message">This meeting is closed. No further check-ins are accepted.</p>`;
-    main.prepend(card);
-    return;
-  }
-
   card.innerHTML = `
     <h2>Check In</h2>
     <label for="name-input">Your name</label>
@@ -351,6 +361,8 @@ function renderForm(status) {
 }
 
 function renderRoster(checkins) {
+  roster = checkins || roster; // remember the latest for optimistic updates
+  checkins = roster;
   let card = document.getElementById('roster-card');
   if (!card) {
     card = document.createElement('div');
@@ -418,7 +430,9 @@ async function submitCheckin() {
       statusMsg.textContent = `Checked in as "${name}".`;
       localStorage.setItem('nhscc-name', name);
       nameInput.value = '';
-      loadRoster();
+      // Show the new entry instantly; the next poll reconciles with the server.
+      roster = roster.concat([{ name, source, timestamp: new Date().toISOString() }]);
+      renderRoster(roster);
     } else {
       statusMsg.className  = 'err';
       statusMsg.textContent = data.error || 'Check-in failed. Try again.';
