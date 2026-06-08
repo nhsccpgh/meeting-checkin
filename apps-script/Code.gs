@@ -282,7 +282,13 @@ function doPost(e) {
           return jsonResponse({ ok: false, error: 'Already checked in' });
         }
       }
-      meetingSheet.appendRow([now, finalName.trim(), source, barcode, uniqueId]);
+      // Format the target row's ID cells as text BEFORE writing, so values like
+      // "083" or "ALBERS-MARK" are preserved even on tabs created before the
+      // text-format fix (appendRow doesn't reliably honor a column's format).
+      const targetRow = meetingSheet.getLastRow() + 1;
+      meetingSheet.getRange(targetRow, 4, 1, 2).setNumberFormat('@'); // Barcode ID + Unique ID
+      meetingSheet.getRange(targetRow, 1, 1, 5)
+        .setValues([[now, finalName.trim(), source, barcode, uniqueId]]);
     } finally {
       lock.releaseLock();
     }
