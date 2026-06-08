@@ -287,7 +287,8 @@ function doPost(e) {
       // "083" or "ALBERS-MARK" are preserved even on tabs created before the
       // text-format fix (appendRow doesn't reliably honor a column's format).
       const targetRow = meetingSheet.getLastRow() + 1;
-      meetingSheet.getRange(targetRow, 4, 1, 2).setNumberFormat('@'); // Barcode ID + Unique ID
+      meetingSheet.getRange(targetRow, 1).setNumberFormat('M/d/yyyy H:mm:ss'); // setValues doesn't auto-format dates
+      meetingSheet.getRange(targetRow, 4, 1, 2).setNumberFormat('@');          // Barcode ID + Unique ID (preserve "083")
       meetingSheet.getRange(targetRow, 1, 1, 5)
         .setValues([[now, finalName.trim(), source, barcode, uniqueId]]);
     } finally {
@@ -585,6 +586,7 @@ function fixMeetingTab() {
   // Normalize headers + formatting.
   tab.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes']]);
   tab.setFrozenRows(1);
+  tab.getRange(2, 1, Math.max(tab.getMaxRows() - 1, 1), 1).setNumberFormat('M/d/yyyy H:mm:ss'); // reveal stored time
   tab.getRange(1, 4, tab.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
 
   const last = tab.getLastRow();
