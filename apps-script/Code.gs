@@ -442,9 +442,12 @@ function matchMember(memberIndex, name) {
 // ID columns (so barcodes like "083" or "ALBERS-MARK" keep their exact value).
 function newMeetingTab(ss, tabName) {
   const sheet = ss.insertSheet(tabName);
-  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID']);
+  // 'Notes' is intentionally left blank by the system — it's a free column for
+  // the points master to annotate check-ins by hand.
+  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes']);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 4, sheet.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
+  sheet.setColumnWidth(6, 280); // Notes
   return sheet;
 }
 
