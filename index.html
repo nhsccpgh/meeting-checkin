@@ -75,6 +75,31 @@
       padding: 14px 12px;
     }
 
+    .typeahead { position: relative; }
+
+    .suggest {
+      position: absolute;
+      left: 0; right: 0; top: 100%;
+      background: #fff;
+      border: 1.5px solid #c9a84c;
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      max-height: 240px;
+      overflow-y: auto;
+      z-index: 10;
+      box-shadow: 0 6px 14px rgba(0,0,0,.12);
+    }
+
+    .suggest div {
+      padding: 12px;
+      font-size: 1rem;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .suggest div:last-child { border-bottom: none; }
+    .suggest div:hover, .suggest div.active { background: #faf6e8; }
+
     .toggle {
       display: flex;
       border: 1.5px solid #ccc;
@@ -182,7 +207,9 @@ const main   = document.getElementById('main');
 const nameEl = document.getElementById('meeting-name');
 
 let pollTimer = null;
-let roster    = []; // last-known check-ins, for optimistic updates
+let roster    = [];   // last-known check-ins, for optimistic updates
+let members   = [];   // [{ i, name, q }] for the name typeahead
+let selectedMember = null; // the member the user picked from the list, if any
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -194,6 +221,53 @@ if (!token) {
   // actually closed or the token is invalid.
   renderForm('open');
   loadRoster();
+  loadMembers();
+}
+
+// ── Member directory (for the name typeahead) ─────────────────────────────────
+
+async function loadMembers() {
+  try {
+    const res  = await fetch(`${API}?action=members`);
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.members)) members = data.members;
+  } catch (_) {
+    // No directory? The name field still works as a plain text box.
+  }
+}
+
+function normName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function wireTypeahead() {
+  const input = document.getElementById('name-input');
+  const box   = document.getElementById('suggest');
+  if (!input || !box) return;
+
+  const close = () => { box.hidden = true; box.innerHTML = ''; };
+
+  input.addEventListener('input', () => {
+    selectedMember = null; // they're editing — drop any prior pick
+    const q = normName(input.value);
+    if (members.length === 0 || q.length < 2) { close(); return; }
+    const matches = members.filter(m => m.q.includes(q)).slice(0, 8);
+    if (matches.length === 0) { close(); return; }
+    box.innerHTML = matches.map(m => `<div data-i="${m.i}">${esc(m.name)}</div>`).join('');
+    box.hidden = false;
+  });
+
+  // mousedown fires before the input's blur, so the pick still registers.
+  box.addEventListener('mousedown', e => {
+    const item = e.target.closest('div[data-i]');
+    if (!item) return;
+    e.preventDefault();
+    const m = members.find(x => x.i === Number(item.dataset.i));
+    if (m) { input.value = m.name; selectedMember = m; }
+    close();
+  });
+
+  input.addEventListener('blur', () => setTimeout(close, 150));
 }
 
 // ── Backup code entry (no token in URL) ───────────────────────────────────────
@@ -253,6 +327,7 @@ async function resolveCode() {
       main.innerHTML = '';
       renderForm('open');
       loadRoster();
+      loadMembers();
     } else {
       statusMsg.className = 'err';
       statusMsg.textContent = data.error || 'No meeting found for that code.';
@@ -344,7 +419,10 @@ function renderForm(status) {
   card.innerHTML = `
     <h2>Check In</h2>
     <label for="name-input">Your name</label>
-    <input type="text" id="name-input" placeholder="First Last" autocomplete="name" autocapitalize="words" autocorrect="off">
+    <div class="typeahead">
+      <input type="text" id="name-input" placeholder="Start typing your name…" autocomplete="off" autocapitalize="words" autocorrect="off">
+      <div id="suggest" class="suggest" hidden></div>
+    </div>
     <div class="toggle">
       <input type="radio" name="source" id="src-person" value="In person" checked>
       <label for="src-person">In person</label>
@@ -356,6 +434,7 @@ function renderForm(status) {
   `;
   main.prepend(card);
 
+  wireTypeahead();
   document.getElementById('submit-btn').addEventListener('click', submitCheckin);
   document.getElementById('name-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') submitCheckin();
@@ -427,7 +506,9 @@ async function submitCheckin() {
       method:  'POST',
       // text/plain avoids CORS preflight — Apps Script doesn't handle OPTIONS
       headers: { 'Content-Type': 'text/plain' },
-      body:    JSON.stringify({ token, name, source }),
+      // memberIndex lets the server grab the exact barcode when a name was picked
+      // from the list; the server also falls back to name matching if it's absent.
+      body:    JSON.stringify({ token, name, source, memberIndex: selectedMember ? selectedMember.i : null }),
     });
     const data = await res.json();
 

@@ -9,9 +9,10 @@ Digital self-service attendance system for the [North Hills Sports Car Club](htt
 ## How it works
 
 1. Before the meeting, the organizer uses the **NHSCC → New Meeting** menu item in the club Google Sheet. This generates a unique token and a 4-digit backup code, creates a per-meeting attendance tab, and shows a QR code + URL + code to share.
-2. Members scan the QR code or paste the link into Zoom chat. They enter their name, choose *In person* or *Zoom*, and tap **Check In**.
+2. Members scan the QR code or paste the link into Zoom chat. They start typing their name, pick themselves from the member list, choose *In person* or *Zoom*, and tap **Check In**. Picking from the list captures their timing-software barcode automatically.
 3. **No QR code?** Members can go to the [live page](https://meetings.nhscc.com) directly and type the 4-digit code (read aloud at the meeting) to reach the same check-in screen.
 4. The roster updates live on-screen every 12 seconds. The club's existing points tracker reads directly from the same Google Sheet — no export step needed.
+5. After the meeting, the points admin uses **NHSCC → Show Attendance** to get the present members' barcode IDs, sorted, to scroll alongside the timing software — plus a short list of any unmatched names to handle by hand.
 
 ---
 
@@ -33,6 +34,7 @@ Vanilla HTML/CSS/JS — no framework, no build step. Hosted on GitHub Pages at t
 
 - Reads the meeting token from the `?m=` query parameter
 - With no token, shows a 4-digit code entry box that resolves the code to a token and redirects into the check-in flow
+- Name field is a typeahead over the `Members` directory; picking a member tags the check-in with their barcode ID (barcodes stay server-side and are never sent to the browser)
 - Fetches the roster on load and polls every 12 seconds
 - Submits check-ins via POST to the Apps Script web app
 
@@ -42,12 +44,14 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 
 | Function | Description |
 |---|---|
-| `doGet(e)` | Returns meeting name, status, and check-in list as JSON; `action=resolve&code=NNNN` maps a backup code to a token |
-| `doPost(e)` | Validates token, checks open/closed status, appends a check-in row |
+| `doGet(e)` | Returns meeting name, status, and check-in list as JSON; `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead |
+| `doPost(e)` | Validates token, checks open/closed status, matches the member to a barcode, appends a check-in row |
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
-| `setup()` | One-time setup — creates the Meetings index tab with headers |
+| `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
+| `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized name/nickname match |
+| `setup()` | One-time setup — creates the Meetings index and Members directory tabs with headers |
 
 ### Google Sheet (datastore)
 
@@ -56,7 +60,14 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 | Token | Meeting Name | Tab Name | Status | Opens At | Closes At | Created At | Check-in URL | Code |
 |---|---|---|---|---|---|---|---|---|
 
-One additional tab is auto-created per meeting with columns: Timestamp, Name, Source.
+**Members tab** (directory — paste a name + barcode export from the timing software):
+
+| Barcode ID | Name | Nicknames |
+|---|---|---|
+
+`Nicknames` is optional and semicolon- or comma-separated (e.g. `Bob; Bobby`) so "Bob" matches "Robert Jones".
+
+One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID.
 
 ---
 

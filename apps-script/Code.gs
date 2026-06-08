@@ -1,6 +1,14 @@
 // Replace with your GitHub Pages URL (no trailing slash)
 const CHECKIN_PAGE_URL = 'https://meetings.nhscc.com';
 const MEETINGS_TAB = 'Meetings';
+const MEMBERS_TAB  = 'Members';
+
+// 1-based column positions in the Members directory tab
+const MCOL = {
+  BARCODE:   1,
+  NAME:      2,
+  NICKNAMES: 3, // optional; semicolon- or comma-separated (e.g. "Bob; Bobby")
+};
 
 // 1-based column positions in the Meetings tab
 const COL = {
@@ -40,7 +48,20 @@ function setup() {
   sheet.getRange(1, COL.MEETING_NAME, sheet.getMaxRows()).setNumberFormat('@');
   sheet.getRange(1, COL.TAB_NAME,     sheet.getMaxRows()).setNumberFormat('@');
   sheet.getRange(1, COL.CODE,         sheet.getMaxRows()).setNumberFormat('@');
-  Logger.log('Setup complete. Meetings tab is ready.');
+
+  // Members directory — paste your timing-software export here (Barcode ID, Name, Nicknames).
+  let members = ss.getSheetByName(MEMBERS_TAB);
+  if (!members) {
+    members = ss.insertSheet(MEMBERS_TAB);
+    members.appendRow(['Barcode ID', 'Name', 'Nicknames']);
+    members.setFrozenRows(1);
+    members.setColumnWidth(MCOL.NAME, 220);
+    members.setColumnWidth(MCOL.NICKNAMES, 220);
+  }
+  // Keep Barcode ID as text so leading zeros and long IDs survive.
+  members.getRange(1, MCOL.BARCODE, members.getMaxRows()).setNumberFormat('@');
+
+  Logger.log('Setup complete. Meetings and Members tabs are ready.');
 }
 
 // ── Organizer menu ────────────────────────────────────────────────────────────
@@ -48,9 +69,11 @@ function setup() {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('NHSCC')
-    .addItem('New Meeting',  'createMeeting')
-    .addItem('Show QR',      'showQR')
-    .addItem('Close Meeting','closeMeeting')
+    .addItem('New Meeting',     'createMeeting')
+    .addItem('Show QR',         'showQR')
+    .addItem('Close Meeting',   'closeMeeting')
+    .addSeparator()
+    .addItem('Show Attendance', 'showAttendance')
     .addToUi();
 }
 
@@ -96,7 +119,7 @@ function createMeeting() {
   let meetingSheet = ss.getSheetByName(tabName);
   if (!meetingSheet) {
     meetingSheet = ss.insertSheet(tabName);
-    meetingSheet.appendRow(['Timestamp', 'Name', 'Source']);
+    meetingSheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID']);
     meetingSheet.setFrozenRows(1);
   }
 
@@ -232,6 +255,12 @@ function doPost(e) {
     if (opensAtDate  && now < opensAtDate)  return jsonResponse({ ok: false, error: 'Meeting has not opened yet' });
     if (closesAtDate && now > closesAtDate) return jsonResponse({ ok: false, error: 'Meeting has closed' });
 
+    // Resolve the member directory: prefer the typeahead's selection, fall back
+    // to a normalized name/nickname match. A miss is fine — recorded as unmatched.
+    const match     = matchMember(body.memberIndex, name);
+    const finalName = match ? match.name : name;
+    const barcode   = match ? match.barcode : '';
+
     const lock = LockService.getScriptLock();
     lock.waitLock(10000);
     try {
@@ -239,18 +268,18 @@ function doPost(e) {
       let meetingSheet = ss.getSheetByName(tabName);
       if (!meetingSheet) {
         meetingSheet = ss.insertSheet(tabName);
-        meetingSheet.appendRow(['Timestamp', 'Name', 'Source']);
+        meetingSheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID']);
         meetingSheet.setFrozenRows(1);
       }
-      // Duplicate guard — case-insensitive name match
+      // Duplicate guard — case-insensitive match on the canonical name
       if (meetingSheet.getLastRow() > 1) {
         const names = meetingSheet.getRange(2, 2, meetingSheet.getLastRow() - 1, 1).getValues();
-        const nameLower = name.trim().toLowerCase();
+        const nameLower = finalName.trim().toLowerCase();
         if (names.some(r => String(r[0]).toLowerCase() === nameLower)) {
           return jsonResponse({ ok: false, error: 'Already checked in' });
         }
       }
-      meetingSheet.appendRow([now, name.trim(), source]);
+      meetingSheet.appendRow([now, finalName.trim(), source, barcode]);
     } finally {
       lock.releaseLock();
     }
@@ -265,6 +294,11 @@ function doPost(e) {
 function doGet(e) {
   try {
     if (!e || !e.parameter) return jsonResponse({ ok: false, error: 'No request parameters' });
+
+    // Member directory for the check-in typeahead (names only — no barcodes leave the server).
+    if (e.parameter.action === 'members') {
+      return jsonResponse({ ok: true, members: listMembers() });
+    }
 
     // Resolve a verbal backup code to a meeting token (open meetings only).
     if (e.parameter.action === 'resolve') {
@@ -347,7 +381,128 @@ function findMeetingByCode(code) {
   return null;
 }
 
-// Generate a 6-digit code unique among currently-open meetings.
+// Normalize a name for matching: lowercase, strip punctuation, collapse spaces.
+function normName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Member list for the check-in typeahead. Returns [{ i, name, q }] where i is the
+// Members-tab row number and q is a lowercase search blob (name + nicknames).
+// Barcode IDs are deliberately NOT included so they never reach the browser.
+function listMembers() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const rows = sheet.getDataRange().getDisplayValues();
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const name = String(rows[i][MCOL.NAME - 1]).trim();
+    if (!name) continue;
+    const nicks = String(rows[i][MCOL.NICKNAMES - 1] || '');
+    out.push({ i: i + 1, name, q: (name + ' ' + nicks).toLowerCase() });
+  }
+  return out;
+}
+
+// Resolve a check-in to a member's barcode. Tries the typeahead's row index first
+// (verified against the submitted name in case the sheet shifted), then a
+// normalized name/nickname match. Returns { barcode, name } or null if unmatched
+// or ambiguous (multiple members share the name — left for the admin to sort out).
+function matchMember(memberIndex, name) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const rows   = sheet.getDataRange().getDisplayValues();
+  const target = normName(name);
+
+  const idx = parseInt(memberIndex, 10);
+  if (idx >= 2 && idx <= rows.length) {
+    const row     = rows[idx - 1];
+    const barcode = String(row[MCOL.BARCODE - 1]).trim();
+    if (barcode && normName(row[MCOL.NAME - 1]) === target) {
+      return { barcode, name: String(row[MCOL.NAME - 1]).trim() };
+    }
+  }
+
+  if (!target) return null;
+  const hits = [];
+  for (let i = 1; i < rows.length; i++) {
+    const canonical = normName(rows[i][MCOL.NAME - 1]);
+    const nicks = String(rows[i][MCOL.NICKNAMES - 1] || '')
+      .split(/[;,]/).map(normName).filter(Boolean);
+    if (canonical === target || nicks.indexOf(target) !== -1) {
+      hits.push({ barcode: String(rows[i][MCOL.BARCODE - 1]).trim(), name: String(rows[i][MCOL.NAME - 1]).trim() });
+    }
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Organizer view: pick a meeting and see its present barcodes sorted (to scroll
+// alongside the timing software), plus any unmatched names to handle by hand.
+function showAttendance() {
+  const ui    = SpreadsheetApp.getUi();
+  const index = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
+  if (!index) { ui.alert('Meetings tab not found.'); return; }
+
+  const data = index.getDataRange().getDisplayValues();
+  const meetings = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][COL.MEETING_NAME - 1]) {
+      meetings.push({ name: data[i][COL.MEETING_NAME - 1], tab: data[i][COL.TAB_NAME - 1] });
+    }
+  }
+  if (meetings.length === 0) { ui.alert('No meetings yet.'); return; }
+
+  let meeting;
+  if (meetings.length === 1) {
+    meeting = meetings[0];
+  } else {
+    const list   = meetings.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
+    const result = ui.prompt('Show Attendance', `Meetings:\n${list}\n\nEnter number:`, ui.ButtonSet.OK_CANCEL);
+    if (result.getSelectedButton() !== ui.Button.OK) return;
+    const idx = parseInt(result.getResponseText().trim(), 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= meetings.length) { ui.alert('Invalid selection.'); return; }
+    meeting = meetings[idx];
+  }
+
+  const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
+  if (!tab || tab.getLastRow() < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
+
+  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID
+  const barcodes = [];
+  const unmatched = [];
+  for (let i = 1; i < rows.length; i++) {
+    const name    = String(rows[i][1] || '').trim();
+    const barcode = String(rows[i][3] || '').trim();
+    if (!name) continue;
+    if (barcode) barcodes.push({ barcode, name });
+    else         unmatched.push(name);
+  }
+
+  barcodes.sort((a, b) => a.barcode.localeCompare(b.barcode, undefined, { numeric: true }));
+  const barcodeText = barcodes.map(b => `${b.barcode}\t${b.name}`).join('\n');
+  const unmatchedHtml = unmatched.length
+    ? `<p style="margin-top:14px;color:#b8400a"><strong>${unmatched.length} unmatched (no barcode — add to Members or mark by hand):</strong><br>${unmatched.map(esc_).join('<br>')}</p>`
+    : `<p style="margin-top:14px;color:#2a7a2a">All ${barcodes.length} check-ins matched a member.</p>`;
+
+  const html = HtmlService.createHtmlOutput(`<!DOCTYPE html>
+<html><body style="font-family:sans-serif;padding:16px;margin:0">
+  <h3 style="margin-top:0">${esc_(meeting.name)}</h3>
+  <p style="font-size:13px;color:#666">${barcodes.length} present, sorted by barcode. Copy to scroll alongside the timing software.</p>
+  <textarea readonly style="width:100%;height:240px;font-family:monospace;font-size:13px"
+            onclick="this.select()">${esc_(barcodeText)}</textarea>
+  ${unmatchedHtml}
+</body></html>`).setWidth(420).setHeight(460);
+
+  ui.showModalDialog(html, 'Attendance');
+}
+
+// HTML-escape for organizer dialogs (server side).
+function esc_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+}
+
+// Generate a 4-digit code unique among currently-open meetings.
 function generateMeetingCode() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
   const taken = new Set();
