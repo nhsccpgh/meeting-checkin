@@ -177,7 +177,7 @@ const API = 'https://script.google.com/macros/s/AKfycbxHtqAqLn8EBH3w1cTkbeSkPOTE
 const POLL_MS = 12000;
 
 const params = new URLSearchParams(location.search);
-const token  = params.get('m');
+let   token  = params.get('m');
 const main   = document.getElementById('main');
 const nameEl = document.getElementById('meeting-name');
 
@@ -245,8 +245,14 @@ async function resolveCode() {
     const res  = await fetch(`${API}?action=resolve&code=${encodeURIComponent(code)}`);
     const data = await res.json();
     if (data.ok && data.token) {
-      // Reload into the normal check-in flow with the resolved token.
-      location.search = '?m=' + encodeURIComponent(data.token);
+      // Transition into the check-in flow in-page (no full reload). Update the
+      // URL so a refresh / bookmark keeps working, then paint the form instantly.
+      token = data.token;
+      history.replaceState(null, '', '?m=' + encodeURIComponent(token));
+      nameEl.textContent = 'Loading…';
+      main.innerHTML = '';
+      renderForm('open');
+      loadRoster();
     } else {
       statusMsg.className = 'err';
       statusMsg.textContent = data.error || 'No meeting found for that code.';

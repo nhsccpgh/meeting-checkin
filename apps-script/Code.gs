@@ -334,13 +334,14 @@ function findMeeting(token) {
 function findMeetingByCode(code) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
   if (!sheet) return null;
-  const range   = sheet.getDataRange();
-  const data    = range.getValues();
-  const display = range.getDisplayValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][COL.STATUS - 1] === 'open' &&
-        String(display[i][COL.CODE - 1]).trim() === String(code).trim()) {
-      return { token: data[i][COL.TOKEN - 1] };
+  // Single read: token, status, and code are all plain strings, so the
+  // display values are sufficient (no need for a second getValues() call).
+  const display = sheet.getDataRange().getDisplayValues();
+  const wanted  = String(code).trim();
+  for (let i = 1; i < display.length; i++) {
+    if (display[i][COL.STATUS - 1] === 'open' &&
+        String(display[i][COL.CODE - 1]).trim() === wanted) {
+      return { token: display[i][COL.TOKEN - 1] };
     }
   }
   return null;
