@@ -437,6 +437,14 @@ function matchMember(memberIndex, name) {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// Run this ONCE from the Apps Script editor (Run → authorizeExternalRequest) to
+// grant the UrlFetchApp permission. It uses no UI, so it completes instantly and
+// triggers Google's consent screen instead of hanging like a menu function would.
+function authorizeExternalRequest() {
+  const resp = UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true });
+  Logger.log('External requests authorized. Test fetch returned HTTP ' + resp.getResponseCode());
+}
+
 // Pull the member directory from the timing-software CSV export and rewrite the
 // Members tab. The export URL changes each time (dated filename), so this prompts
 // for it and remembers the last one used.
