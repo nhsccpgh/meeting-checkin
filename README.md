@@ -2,7 +2,7 @@
 
 Digital self-service attendance system for the [North Hills Sports Car Club](https://nhscc.org) monthly autocross meetings. Members scan a QR code or follow a link to sign themselves in — no paper, no clipboard.
 
-**Live page:** https://nhsccpgh.github.io/meeting-checkin
+**Live page:** https://meetings.nhscc.com
 
 ---
 
@@ -10,7 +10,7 @@ Digital self-service attendance system for the [North Hills Sports Car Club](htt
 
 1. Before the meeting, the organizer uses the **NHSCC → New Meeting** menu item in the club Google Sheet. This generates a unique token and a 4-digit backup code, creates a per-meeting attendance tab, and shows a QR code + URL + code to share.
 2. Members scan the QR code or paste the link into Zoom chat. They enter their name, choose *In person* or *Zoom*, and tap **Check In**.
-3. **No QR code?** Members can go to the [live page](https://nhsccpgh.github.io/meeting-checkin) directly and type the 4-digit code (read aloud at the meeting) to reach the same check-in screen.
+3. **No QR code?** Members can go to the [live page](https://meetings.nhscc.com) directly and type the 4-digit code (read aloud at the meeting) to reach the same check-in screen.
 4. The roster updates live on-screen every 12 seconds. The club's existing points tracker reads directly from the same Google Sheet — no export step needed.
 
 ---

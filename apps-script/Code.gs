@@ -1,5 +1,5 @@
 // Replace with your GitHub Pages URL (no trailing slash)
-const CHECKIN_PAGE_URL = 'https://nhsccpgh.github.io/meeting-checkin';
+const CHECKIN_PAGE_URL = 'https://meetings.nhscc.com';
 const MEETINGS_TAB = 'Meetings';
 
 // 1-based column positions in the Meetings tab
