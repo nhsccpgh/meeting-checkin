@@ -245,7 +245,7 @@ function wireTypeahead() {
   const box   = document.getElementById('suggest');
   if (!input || !box) return;
 
-  const close = () => { box.hidden = true; box.innerHTML = ''; };
+  const close = () => { box.hidden = true; box.innerHTML = ''; input.setAttribute('aria-expanded', 'false'); };
 
   input.addEventListener('input', () => {
     selectedMember = null; // they're editing — drop any prior pick
@@ -253,8 +253,9 @@ function wireTypeahead() {
     if (members.length === 0 || q.length < 2) { close(); return; }
     const matches = members.filter(m => m.q.includes(q)).slice(0, 8);
     if (matches.length === 0) { close(); return; }
-    box.innerHTML = matches.map(m => `<div data-i="${m.i}">${esc(m.name)}</div>`).join('');
+    box.innerHTML = matches.map(m => `<div role="option" data-i="${m.i}">${esc(m.name)}</div>`).join('');
     box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   });
 
   // mousedown fires before the input's blur, so the pick still registers.
@@ -420,8 +421,10 @@ function renderForm(status) {
     <h2>Check In</h2>
     <label for="name-input">Your name</label>
     <div class="typeahead">
-      <input type="text" id="name-input" placeholder="Start typing your name…" autocomplete="off" autocapitalize="words" autocorrect="off">
-      <div id="suggest" class="suggest" hidden></div>
+      <input type="text" id="name-input" placeholder="Start typing your name…"
+             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest"
+             autocomplete="new-password" autocapitalize="words" autocorrect="off" spellcheck="false">
+      <div id="suggest" class="suggest" role="listbox" hidden></div>
     </div>
     <div class="toggle">
       <input type="radio" name="source" id="src-person" value="In person" checked>
