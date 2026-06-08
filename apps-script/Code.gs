@@ -124,9 +124,7 @@ function createMeeting() {
   // Create the per-meeting tab
   let meetingSheet = ss.getSheetByName(tabName);
   if (!meetingSheet) {
-    meetingSheet = ss.insertSheet(tabName);
-    meetingSheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID']);
-    meetingSheet.setFrozenRows(1);
+    meetingSheet = newMeetingTab(ss, tabName);
   }
 
   // Append to the Meetings index
@@ -266,6 +264,7 @@ function doPost(e) {
     const match     = matchMember(body.memberIndex, name);
     const finalName = match ? match.name : name;
     const barcode   = match ? match.barcode : '';
+    const uniqueId  = match ? match.uniqueId : '';
 
     const lock = LockService.getScriptLock();
     lock.waitLock(10000);
@@ -273,9 +272,7 @@ function doPost(e) {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       let meetingSheet = ss.getSheetByName(tabName);
       if (!meetingSheet) {
-        meetingSheet = ss.insertSheet(tabName);
-        meetingSheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID']);
-        meetingSheet.setFrozenRows(1);
+        meetingSheet = newMeetingTab(ss, tabName);
       }
       // Duplicate guard — case-insensitive match on the canonical name
       if (meetingSheet.getLastRow() > 1) {
@@ -285,7 +282,7 @@ function doPost(e) {
           return jsonResponse({ ok: false, error: 'Already checked in' });
         }
       }
-      meetingSheet.appendRow([now, finalName.trim(), source, barcode]);
+      meetingSheet.appendRow([now, finalName.trim(), source, barcode, uniqueId]);
     } finally {
       lock.releaseLock();
     }
@@ -408,9 +405,18 @@ function listMembers() {
   return out;
 }
 
-// Resolve a check-in to a member's barcode. Tries the typeahead's row index first
-// (verified against the submitted name in case the sheet shifted), then a
-// normalized full-name match. Returns { barcode, name } or null if unmatched or
+// Build a member object from a Members-tab display row.
+function memberFromRow(row) {
+  return {
+    uniqueId: String(row[MCOL.UNIQUE_ID - 1]).trim(),
+    barcode:  String(row[MCOL.BARCODE - 1]).trim(),
+    name:     String(row[MCOL.NAME - 1]).trim(),
+  };
+}
+
+// Resolve a check-in to a member. Tries the typeahead's row index first (verified
+// against the submitted name in case the sheet shifted), then a normalized
+// full-name match. Returns { uniqueId, barcode, name } or null if unmatched or
 // ambiguous (multiple members share the name — left for the admin to sort out).
 function matchMember(memberIndex, name) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
@@ -420,21 +426,26 @@ function matchMember(memberIndex, name) {
 
   const idx = parseInt(memberIndex, 10);
   if (idx >= 2 && idx <= rows.length) {
-    const row     = rows[idx - 1];
-    const barcode = String(row[MCOL.BARCODE - 1]).trim();
-    if (barcode && normName(row[MCOL.NAME - 1]) === target) {
-      return { barcode, name: String(row[MCOL.NAME - 1]).trim() };
-    }
+    const m = memberFromRow(rows[idx - 1]);
+    if (normName(m.name) === target) return m;
   }
 
   if (!target) return null;
   const hits = [];
   for (let i = 1; i < rows.length; i++) {
-    if (normName(rows[i][MCOL.NAME - 1]) === target) {
-      hits.push({ barcode: String(rows[i][MCOL.BARCODE - 1]).trim(), name: String(rows[i][MCOL.NAME - 1]).trim() });
-    }
+    if (normName(rows[i][MCOL.NAME - 1]) === target) hits.push(memberFromRow(rows[i]));
   }
   return hits.length === 1 ? hits[0] : null;
+}
+
+// Create a per-meeting attendance tab with the right headers and text-formatted
+// ID columns (so barcodes like "083" or "ALBERS-MARK" keep their exact value).
+function newMeetingTab(ss, tabName) {
+  const sheet = ss.insertSheet(tabName);
+  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID']);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 4, sheet.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
+  return sheet;
 }
 
 // Run this ONCE from the Apps Script editor (Run → authorizeExternalRequest) to
@@ -539,27 +550,30 @@ function showAttendance() {
   const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
   if (!tab || tab.getLastRow() < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
 
-  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID
-  const barcodes = [];
+  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID, Unique ID
+  const matched   = [];
   const unmatched = [];
   for (let i = 1; i < rows.length; i++) {
-    const name    = String(rows[i][1] || '').trim();
-    const barcode = String(rows[i][3] || '').trim();
+    const name     = String(rows[i][1] || '').trim();
+    const barcode  = String(rows[i][3] || '').trim();
+    const uniqueId = String(rows[i][4] || '').trim();
     if (!name) continue;
-    if (barcode) barcodes.push({ barcode, name });
-    else         unmatched.push(name);
+    if (barcode || uniqueId) matched.push({ barcode, uniqueId, name });
+    else                     unmatched.push(name);
   }
 
-  barcodes.sort((a, b) => a.barcode.localeCompare(b.barcode, undefined, { numeric: true }));
-  const barcodeText = barcodes.map(b => `${b.barcode}\t${b.name}`).join('\n');
+  matched.sort((a, b) => a.barcode.localeCompare(b.barcode, undefined, { numeric: true }));
+  const barcodeText = ['Barcode\tUnique ID\tName']
+    .concat(matched.map(m => `${m.barcode}\t${m.uniqueId}\t${m.name}`))
+    .join('\n');
   const unmatchedHtml = unmatched.length
-    ? `<p style="margin-top:14px;color:#b8400a"><strong>${unmatched.length} unmatched (no barcode — add to Members or mark by hand):</strong><br>${unmatched.map(esc_).join('<br>')}</p>`
-    : `<p style="margin-top:14px;color:#2a7a2a">All ${barcodes.length} check-ins matched a member.</p>`;
+    ? `<p style="margin-top:14px;color:#b8400a"><strong>${unmatched.length} unmatched (not in directory — add to Members or mark by hand):</strong><br>${unmatched.map(esc_).join('<br>')}</p>`
+    : `<p style="margin-top:14px;color:#2a7a2a">All ${matched.length} check-ins matched a member.</p>`;
 
   const html = HtmlService.createHtmlOutput(`<!DOCTYPE html>
 <html><body style="font-family:sans-serif;padding:16px;margin:0">
   <h3 style="margin-top:0">${esc_(meeting.name)}</h3>
-  <p style="font-size:13px;color:#666">${barcodes.length} present, sorted by barcode. Copy to scroll alongside the timing software.</p>
+  <p style="font-size:13px;color:#666">${matched.length} present, sorted by barcode. Copy to scroll alongside the timing software.</p>
   <textarea readonly style="width:100%;height:240px;font-family:monospace;font-size:13px"
             onclick="this.select()">${esc_(barcodeText)}</textarea>
   ${unmatchedHtml}

@@ -68,7 +68,7 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 
 Synced from the timing-software CSV export (`UniqueID, Barcode, CarID, FirstName, LastName`). Only those identity columns are pulled in — the export's PII columns (address, email, phone) are ignored. The export URL changes per export (dated filename), so **Sync Members** prompts for it and remembers the last one used.
 
-One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID.
+One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form.
 
 ---
 
