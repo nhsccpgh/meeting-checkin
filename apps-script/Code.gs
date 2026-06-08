@@ -3,12 +3,17 @@ const CHECKIN_PAGE_URL = 'https://meetings.nhscc.com';
 const MEETINGS_TAB = 'Meetings';
 const MEMBERS_TAB  = 'Members';
 
-// 1-based column positions in the Members directory tab
+// 1-based column positions in the Members directory tab.
+// Synced from the timing-software CSV export via NHSCC → Sync Members.
 const MCOL = {
-  BARCODE:   1,
-  NAME:      2,
-  NICKNAMES: 3, // optional; semicolon- or comma-separated (e.g. "Bob; Bobby")
+  UNIQUE_ID: 1,
+  BARCODE:   2,
+  NAME:      3, // full name (FirstName + LastName from the export)
 };
+
+// Source CSV columns (0-based) in the timing-software export:
+//   UniqueID, Barcode, CarID, FirstName, LastName
+const CSV = { UNIQUE_ID: 0, BARCODE: 1, FIRST_NAME: 3, LAST_NAME: 4 };
 
 // 1-based column positions in the Meetings tab
 const COL = {
@@ -49,19 +54,19 @@ function setup() {
   sheet.getRange(1, COL.TAB_NAME,     sheet.getMaxRows()).setNumberFormat('@');
   sheet.getRange(1, COL.CODE,         sheet.getMaxRows()).setNumberFormat('@');
 
-  // Members directory — paste your timing-software export here (Barcode ID, Name, Nicknames).
+  // Members directory — populated by NHSCC → Sync Members from the CSV export.
   let members = ss.getSheetByName(MEMBERS_TAB);
   if (!members) {
     members = ss.insertSheet(MEMBERS_TAB);
-    members.appendRow(['Barcode ID', 'Name', 'Nicknames']);
+    members.appendRow(['Unique ID', 'Barcode', 'Name']);
     members.setFrozenRows(1);
-    members.setColumnWidth(MCOL.NAME, 220);
-    members.setColumnWidth(MCOL.NICKNAMES, 220);
+    members.setColumnWidth(MCOL.NAME, 240);
   }
-  // Keep Barcode ID as text so leading zeros and long IDs survive.
-  members.getRange(1, MCOL.BARCODE, members.getMaxRows()).setNumberFormat('@');
+  // Keep ID columns as text so leading zeros and long IDs survive.
+  members.getRange(1, MCOL.UNIQUE_ID, members.getMaxRows()).setNumberFormat('@');
+  members.getRange(1, MCOL.BARCODE,   members.getMaxRows()).setNumberFormat('@');
 
-  Logger.log('Setup complete. Meetings and Members tabs are ready.');
+  Logger.log('Setup complete. Meetings and Members tabs are ready. Run "Sync Members" to populate the directory.');
 }
 
 // ── Organizer menu ────────────────────────────────────────────────────────────
@@ -74,6 +79,7 @@ function onOpen() {
     .addItem('Close Meeting',   'closeMeeting')
     .addSeparator()
     .addItem('Show Attendance', 'showAttendance')
+    .addItem('Sync Members',    'syncMembers')
     .addToUi();
 }
 
@@ -387,8 +393,8 @@ function normName(s) {
 }
 
 // Member list for the check-in typeahead. Returns [{ i, name, q }] where i is the
-// Members-tab row number and q is a lowercase search blob (name + nicknames).
-// Barcode IDs are deliberately NOT included so they never reach the browser.
+// Members-tab row number and q is the lowercase name for searching.
+// Barcodes are deliberately NOT included so they never reach the browser.
 function listMembers() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
   if (!sheet || sheet.getLastRow() < 2) return [];
@@ -397,16 +403,15 @@ function listMembers() {
   for (let i = 1; i < rows.length; i++) {
     const name = String(rows[i][MCOL.NAME - 1]).trim();
     if (!name) continue;
-    const nicks = String(rows[i][MCOL.NICKNAMES - 1] || '');
-    out.push({ i: i + 1, name, q: (name + ' ' + nicks).toLowerCase() });
+    out.push({ i: i + 1, name, q: name.toLowerCase() });
   }
   return out;
 }
 
 // Resolve a check-in to a member's barcode. Tries the typeahead's row index first
 // (verified against the submitted name in case the sheet shifted), then a
-// normalized name/nickname match. Returns { barcode, name } or null if unmatched
-// or ambiguous (multiple members share the name — left for the admin to sort out).
+// normalized full-name match. Returns { barcode, name } or null if unmatched or
+// ambiguous (multiple members share the name — left for the admin to sort out).
 function matchMember(memberIndex, name) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
   if (!sheet || sheet.getLastRow() < 2) return null;
@@ -425,14 +430,74 @@ function matchMember(memberIndex, name) {
   if (!target) return null;
   const hits = [];
   for (let i = 1; i < rows.length; i++) {
-    const canonical = normName(rows[i][MCOL.NAME - 1]);
-    const nicks = String(rows[i][MCOL.NICKNAMES - 1] || '')
-      .split(/[;,]/).map(normName).filter(Boolean);
-    if (canonical === target || nicks.indexOf(target) !== -1) {
+    if (normName(rows[i][MCOL.NAME - 1]) === target) {
       hits.push({ barcode: String(rows[i][MCOL.BARCODE - 1]).trim(), name: String(rows[i][MCOL.NAME - 1]).trim() });
     }
   }
   return hits.length === 1 ? hits[0] : null;
+}
+
+// Pull the member directory from the timing-software CSV export and rewrite the
+// Members tab. The export URL changes each time (dated filename), so this prompts
+// for it and remembers the last one used.
+function syncMembers() {
+  const ui    = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  const saved = props.getProperty('MEMBERS_CSV_URL') || '';
+
+  const res = ui.prompt('Sync Members',
+    (saved ? `Last URL:\n${saved}\n\n` : '') +
+    'Paste the CSV export URL (or leave blank to reuse the last one):',
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+
+  const url = res.getResponseText().trim() || saved;
+  if (!url) { ui.alert('No URL provided.'); return; }
+
+  let text;
+  try {
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    if (resp.getResponseCode() !== 200) {
+      ui.alert(`Could not fetch the CSV (HTTP ${resp.getResponseCode()}). Check the URL is correct and public.`);
+      return;
+    }
+    text = resp.getContentText();
+  } catch (err) {
+    ui.alert('Fetch failed: ' + err.message);
+    return;
+  }
+
+  const table = Utilities.parseCsv(text);
+  if (!table || table.length < 2) { ui.alert('The CSV looks empty.'); return; }
+
+  // Row 0 is the header (UniqueID, Barcode, CarID, FirstName, LastName).
+  const out = [];
+  for (let i = 1; i < table.length; i++) {
+    const r = table[i];
+    if (!r || r.length <= CSV.LAST_NAME) continue;
+    const name = (String(r[CSV.FIRST_NAME] || '').trim() + ' ' + String(r[CSV.LAST_NAME] || '').trim()).trim();
+    if (!name) continue;
+    out.push([
+      String(r[CSV.UNIQUE_ID] || '').trim(),
+      String(r[CSV.BARCODE]   || '').trim(),
+      name,
+    ]);
+  }
+  if (out.length === 0) { ui.alert('No member rows found in the CSV.'); return; }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(MEMBERS_TAB);
+  if (!sheet) sheet = ss.insertSheet(MEMBERS_TAB);
+
+  sheet.clearContents();
+  sheet.getRange(1, MCOL.UNIQUE_ID, sheet.getMaxRows()).setNumberFormat('@');
+  sheet.getRange(1, MCOL.BARCODE,   sheet.getMaxRows()).setNumberFormat('@');
+  sheet.getRange(1, 1, 1, 3).setValues([['Unique ID', 'Barcode', 'Name']]);
+  sheet.getRange(2, 1, out.length, 3).setValues(out);
+  sheet.setFrozenRows(1);
+
+  props.setProperty('MEMBERS_CSV_URL', url);
+  ui.alert(`Synced ${out.length} members from the CSV.`);
 }
 
 // Organizer view: pick a meeting and see its present barcodes sorted (to scroll

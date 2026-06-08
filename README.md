@@ -50,7 +50,8 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
 | `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
-| `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized name/nickname match |
+| `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
+| `syncMembers()` | Fetches the timing-software CSV export from a (remembered, re-promptable) URL and rewrites the Members tab |
 | `setup()` | One-time setup — creates the Meetings index and Members directory tabs with headers |
 
 ### Google Sheet (datastore)
@@ -60,12 +61,12 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 | Token | Meeting Name | Tab Name | Status | Opens At | Closes At | Created At | Check-in URL | Code |
 |---|---|---|---|---|---|---|---|---|
 
-**Members tab** (directory — paste a name + barcode export from the timing software):
+**Members tab** (directory — populated by **NHSCC → Sync Members**, not edited by hand):
 
-| Barcode ID | Name | Nicknames |
+| Unique ID | Barcode | Name |
 |---|---|---|
 
-`Nicknames` is optional and semicolon- or comma-separated (e.g. `Bob; Bobby`) so "Bob" matches "Robert Jones".
+Synced from the timing-software CSV export (`UniqueID, Barcode, CarID, FirstName, LastName`). Only those identity columns are pulled in — the export's PII columns (address, email, phone) are ignored. The export URL changes per export (dated filename), so **Sync Members** prompts for it and remembers the last one used.
 
 One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID.
 
