@@ -80,6 +80,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('NHSCC')
     .addItem('New Meeting',     'createMeeting')
+    .addItem('Bulk Create Meetings', 'bulkCreateMeetings')
     .addItem('Show QR',         'showQR')
     .addItem('Close Meeting',   'closeMeeting')
     .addItem('Reopen Meeting',  'reopenMeeting')
@@ -118,14 +119,20 @@ function createMeeting() {
   if (closesResult.getSelectedButton() !== ui.Button.OK) return;
   const closesText = closesResult.getResponseText().trim();
 
-  const token     = Utilities.getUuid();
-  const code      = generateMeetingCode();
-  const now       = new Date();
-  const opensAt   = opensText  ? new Date(opensText)  : '';
-  const closesAt  = closesText ? new Date(closesText) : '';
-  const checkinUrl = `${CHECKIN_PAGE_URL}?m=${token}`;
+  const opensAt  = opensText  ? new Date(opensText)  : '';
+  const closesAt = closesText ? new Date(closesText) : '';
+  const meeting  = createMeetingRecord(meetingName, opensAt, closesAt);
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ui.showModalDialog(meetingDialogHtml(meetingName, meeting.checkinUrl, meeting.code), 'Meeting Created');
+}
+
+// Create a meeting's tab + index row. Shared by createMeeting (prompt flow)
+// and bulkCreateMonthly. Returns { token, code, checkinUrl, tabName }.
+function createMeetingRecord(meetingName, opensAt, closesAt) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const token = Utilities.getUuid();
+  const code  = generateMeetingCode();
+  const checkinUrl = `${CHECKIN_PAGE_URL}?m=${token}`;
 
   // Never reuse an existing tab — that would interleave two meetings' check-ins
   // in one sheet. If the name is taken (e.g. a recreated meeting), suffix it.
@@ -136,11 +143,39 @@ function createMeeting() {
   }
   newMeetingTab(ss, tabName);
 
-  // Append to the Meetings index
-  ss.getSheetByName(MEETINGS_TAB)
-    .appendRow([token, meetingName, tabName, 'open', opensAt, closesAt, now, checkinUrl, code]);
+  // Write the index row with text format applied to the exact target cells
+  // first — appendRow ignores column formats, and names like "July 2026"
+  // would silently become Dates.
+  const index = ss.getSheetByName(MEETINGS_TAB);
+  const row   = index.getLastRow() + 1;
+  index.getRange(row, COL.MEETING_NAME, 1, 2).setNumberFormat('@'); // Meeting Name + Tab Name
+  index.getRange(row, COL.CODE).setNumberFormat('@');
+  index.getRange(row, 1, 1, 9)
+    .setValues([[token, meetingName, tabName, 'open', opensAt || '', closesAt || '', new Date(), checkinUrl, code]]);
 
-  ui.showModalDialog(meetingDialogHtml(meetingName, checkinUrl, code), 'Meeting Created');
+  return { token, code, checkinUrl, tabName };
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+                     'July', 'August', 'September', 'October', 'November', 'December'];
+
+// The 3rd Wednesday of a month (0-based monthIndex) at hour:minute, in the
+// script's timezone — the club's standing meeting slot.
+function thirdWednesday(year, monthIndex, hour, minute) {
+  const first = new Date(year, monthIndex, 1);
+  const toFirstWednesday = (3 - first.getDay() + 7) % 7;
+  return new Date(year, monthIndex, 1 + toFirstWednesday + 14, hour || 0, minute || 0);
+}
+
+// True if a meeting with this exact name is already in the index.
+function meetingNameExists(name) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
+  if (!sheet) return false;
+  const display = sheet.getDataRange().getDisplayValues();
+  for (let i = 1; i < display.length; i++) {
+    if (display[i][COL.MEETING_NAME - 1] === name) return true;
+  }
+  return false;
 }
 
 function closeMeeting() {
@@ -274,6 +309,86 @@ function showQR() {
   }
 
   ui.showModalDialog(meetingDialogHtml(meeting.name, meeting.url, meeting.code), 'Check-in QR');
+}
+
+// Bulk-create the club's standing monthly meetings: 3rd Wednesday, sign-ins
+// 7:00–9:00 PM, named "Month Year". Shows a checkbox picker over the next 18
+// months; months whose meeting has already ended or that already exist in the
+// index aren't selectable.
+function bulkCreateMeetings() {
+  const now  = new Date();
+  const rows = [];
+  for (let k = 0; k < 18; k++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + k, 1);
+    const y = d.getFullYear(), m = d.getMonth();
+    if (thirdWednesday(y, m, 21, 0) <= now) continue; // this month's meeting already ended
+    const opens = thirdWednesday(y, m, 19, 0);
+    rows.push({
+      key:    `${y}-${String(m + 1).padStart(2, '0')}`,
+      name:   `${MONTH_NAMES[m]} ${y}`,
+      label:  `Wed ${opens.getMonth() + 1}/${opens.getDate()}/${y}, 7–9 PM`,
+      exists: meetingNameExists(`${MONTH_NAMES[m]} ${y}`),
+    });
+  }
+
+  const items = rows.map(r => r.exists
+    ? `<label style="display:block;padding:4px 0;color:#999"><input type="checkbox" disabled> ${esc_(r.name)} — ${r.label} (already exists)</label>`
+    : `<label style="display:block;padding:4px 0"><input type="checkbox" name="mo" value="${r.key}"> ${esc_(r.name)} — ${r.label}</label>`
+  ).join('');
+
+  const html = HtmlService.createHtmlOutput(`<!DOCTYPE html>
+<html><body style="font-family:sans-serif;padding:16px;margin:0">
+  <p style="font-size:13px;color:#666;margin-top:0">3rd Wednesday of each month, sign-ins open 7:00–9:00 PM. Pick the months to create:</p>
+  <label style="display:block;padding:4px 0;border-bottom:1px solid #eee;margin-bottom:4px">
+    <input type="checkbox" onclick="document.querySelectorAll('input[name=mo]').forEach(c => c.checked = this.checked)"> <strong>Select all</strong>
+  </label>
+  <div id="list" style="max-height:300px;overflow-y:auto">${items}</div>
+  <button id="go" onclick="create()" style="margin-top:12px;padding:8px 16px;font-weight:700">Create selected</button>
+  <p id="status" style="font-size:13px;min-height:1.2em"></p>
+  <script>
+    function create() {
+      const keys   = Array.from(document.querySelectorAll('input[name=mo]:checked')).map(c => c.value);
+      const status = document.getElementById('status');
+      if (keys.length === 0) { status.textContent = 'Nothing selected.'; return; }
+      document.getElementById('go').disabled = true;
+      status.textContent = 'Creating ' + keys.length + ' meeting(s)… this takes a few seconds.';
+      google.script.run
+        .withSuccessHandler(lines => {
+          document.getElementById('list').innerHTML = lines.map(l => '<div style="padding:2px 0">' + l + '</div>').join('');
+          document.getElementById('go').style.display = 'none';
+          status.textContent = 'Done. Use Show QR to get each meeting’s QR code and backup code.';
+        })
+        .withFailureHandler(err => {
+          status.textContent = 'Failed: ' + err.message;
+          document.getElementById('go').disabled = false;
+        })
+        .bulkCreateMonthly(keys);
+    }
+  </script>
+</body></html>`).setWidth(380).setHeight(540);
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'Bulk Create Meetings');
+}
+
+// Called from the bulk-create dialog with 'YYYY-MM' keys. Everything else is
+// recomputed server-side (never trust dialog input beyond which months).
+// Returns one human-readable result line per key.
+function bulkCreateMonthly(keys) {
+  const now = new Date();
+  const out = [];
+  (keys || []).forEach(key => {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(key));
+    const monthIndex = m ? Number(m[2]) - 1 : -1;
+    if (!m || monthIndex < 0 || monthIndex > 11) { out.push(`${key}: skipped (bad month)`); return; }
+    const year = Number(m[1]);
+    const name = `${MONTH_NAMES[monthIndex]} ${year}`;
+    if (meetingNameExists(name)) { out.push(`${name}: skipped (already exists)`); return; }
+    const closesAt = thirdWednesday(year, monthIndex, 21, 0);
+    if (closesAt <= now) { out.push(`${name}: skipped (already passed)`); return; }
+    const created = createMeetingRecord(name, thirdWednesday(year, monthIndex, 19, 0), closesAt);
+    out.push(`${name}: created — code ${created.code}`);
+  });
+  return out;
 }
 
 // Shared QR + URL + backup-code dialog used by createMeeting and showQR.

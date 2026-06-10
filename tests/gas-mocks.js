@@ -130,7 +130,7 @@ function loadCode() {
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const api = vm.runInNewContext(
-    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup })',
+    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup, createMeetingRecord, thirdWednesday, meetingNameExists, bulkCreateMonthly })',
     sandbox,
     { filename: 'Code.gs' }
   );

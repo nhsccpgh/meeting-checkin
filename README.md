@@ -52,6 +52,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 | `doPost(e)` | Validates token, checks open/closed status, matches the member to a barcode, appends a check-in row |
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
+| `bulkCreateMeetings()` | Checkbox picker over the next 18 months — creates the standing monthly meetings (3rd Wednesday, sign-ins 7–9 PM, named "Month Year"), skipping months that already exist or have passed |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
 | `reopenMeeting()` | Reopens a closed meeting — re-issues the backup code if another open meeting took it, and clears a passed Closes At time |
 | `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
@@ -96,6 +97,8 @@ This stands up the whole system from scratch — it has already been done for th
 5. Push `index.html` to the `main` branch — GitHub Pages serves it automatically.
 
 ## Running a meeting
+
+**Standing monthly meetings:** use **NHSCC → Bulk Create Meetings** to create months in advance — tick the months you want and each gets a "Month Year" meeting on the 3rd Wednesday with sign-ins open 7:00–9:00 PM, fully self-managing. For a one-off meeting:
 
 1. Open the Google Sheet and go to **NHSCC → New Meeting**.
 2. Enter the meeting name (e.g. `May 2026 Autocross`).

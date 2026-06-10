@@ -256,6 +256,86 @@ test('normName collapses case, punctuation, and spacing', () => {
   assert.equal(api.normName(null), '');
 });
 
+test('thirdWednesday lands on the third Wednesday at the given time', () => {
+  const { api } = loadCode();
+  for (const [y, m] of [[2026, 0], [2026, 5], [2026, 11], [2027, 1], [2028, 1]]) {
+    const d = api.thirdWednesday(y, m, 19, 0);
+    assert.equal(d.getFullYear(), y);
+    assert.equal(d.getMonth(), m);
+    assert.equal(d.getDay(), 3, 'must be a Wednesday');
+    assert.equal(d.getHours(), 19);
+    // Independent check: it must be the 3rd Wednesday, counted from the 1st.
+    let wednesdays = 0;
+    for (let day = 1; day <= d.getDate(); day++) {
+      if (new Date(y, m, day).getDay() === 3) wednesdays++;
+    }
+    assert.equal(wednesdays, 3);
+  }
+});
+
+test('createMeetingRecord writes the index row and suffixes a taken tab name', () => {
+  const { api, ss } = loadCode();
+  api.setup();
+
+  const a = api.createMeetingRecord('July 2026', '', '');
+  const b = api.createMeetingRecord('July 2026', '', '');
+  assert.equal(a.tabName, 'July 2026');
+  assert.equal(b.tabName, 'July 2026 (2)');
+  assert.ok(ss.getSheetByName('July 2026 (2)'), 'suffixed tab exists');
+
+  const idx = ss.getSheetByName('Meetings');
+  assert.equal(idx.getLastRow(), 3); // header + 2 meetings
+  const row = idx.data[1];
+  assert.equal(row[1], 'July 2026');
+  assert.equal(row[3], 'open');
+  assert.ok(String(row[7]).includes(a.token), 'check-in URL embeds the token');
+  assert.match(String(row[8]), /^\d{4}$/);
+});
+
+test('bulkCreateMonthly creates 7–9 PM third-Wednesday meetings and skips existing/passed/bad months', () => {
+  const { api, ss } = loadCode();
+  api.setup();
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const keyFor = monthsAhead => {
+    const d = new Date(now.getFullYear(), now.getMonth() + monthsAhead, 1);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  };
+
+  const created = api.bulkCreateMonthly([keyFor(2), keyFor(3), 'garbage']);
+  assert.match(created[0], /: created — code \d{4}$/);
+  assert.match(created[1], /: created — code \d{4}$/);
+  assert.match(created[2], /skipped \(bad month\)/);
+
+  const idx = ss.getSheetByName('Meetings');
+  assert.equal(idx.getLastRow(), 3); // header + 2 created
+  for (const row of [idx.data[1], idx.data[2]]) {
+    assert.equal(row[3], 'open');
+    assert.equal(row[4].getDay(), 3, 'opens on a Wednesday');
+    assert.equal(row[4].getHours(), 19);
+    assert.equal(row[5].getHours(), 21);
+    assert.equal(row[4].getDate(), row[5].getDate(), 'opens and closes the same day');
+  }
+
+  // Re-running the same months must not duplicate.
+  const again = api.bulkCreateMonthly([keyFor(2), keyFor(36)]);
+  assert.match(again[0], /skipped \(already exists\)/);
+  assert.match(again[1], /: created — code \d{4}$/); // far future is fine
+  assert.match(String(api.bulkCreateMonthly([`${now.getFullYear() - 1}-01`])[0]), /skipped \(already passed\)/);
+  assert.equal(idx.getLastRow(), 4);
+});
+
+test('a bulk-created meeting is checkin-able end to end inside its window', () => {
+  const { api, ss } = loadCode();
+  api.setup();
+  // Seed a normal meeting through the shared creation path, then force its
+  // window open and verify doPost accepts a check-in against it.
+  const rec = api.createMeetingRecord('Window Test', new Date(Date.now() - HOUR), new Date(Date.now() + HOUR));
+  const res = post(api, { token: rec.token, name: 'Ann Yu', source: 'In person' });
+  assert.deepEqual(res, { ok: true });
+  assert.equal(ss.getSheetByName('Window Test').getLastRow(), 2);
+});
+
 test('setup creates the Meetings and Members tabs with headers, and is idempotent', () => {
   const { api, ss } = loadCode();
   api.setup();
