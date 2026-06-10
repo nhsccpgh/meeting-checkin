@@ -19,9 +19,9 @@ Three independent components with no shared build toolchain:
 - Fetches roster via `GET` on load, polls every ~12s; submits check-ins via `POST`
 - Renders QR codes client-side using qrcodejs from CDN (do NOT use Google's retired Chart API QR endpoint)
 
-### 2. Google Apps Script web app (`apps-script/Code.gs` or similar)
-- Google's JavaScript runtime — deployed from script.google.com as a Web App
-- Deploy settings: "Execute as: me", "Who has access: Anyone"
+### 2. Google Apps Script web app (`apps-script/Code.gs`)
+- Google's JavaScript runtime — deployed as a Web App via `./deploy.sh` (clasp; see Deployment)
+- Deploy settings ("Execute as: me", "Who has access: Anyone") are codified in `apps-script/appsscript.json`
 - `doGet(e)` — returns meeting name, status, and check-ins list as JSON; supports `action=meta` for metadata only
 - `doPost(e)` — validates token, checks open/close status and time window, acquires LockService lock, appends row to meeting tab
 - `onOpen()` — adds "NHSCC" custom menu with "New Meeting" and "Close Meeting" items
@@ -54,6 +54,12 @@ Three independent components with no shared build toolchain:
 
 ## Deployment
 
-- **Apps Script**: deploy/redeploy from script.google.com; the Web App URL goes into `index.html` JS config (it is not a secret)
-- **Static page**: push to GitHub Pages — no build step, just the HTML file
-- **Sheet**: create once manually; all subsequent per-meeting tabs are auto-created by the script
+- **Apps Script — run `./deploy.sh` after any `Code.gs` change.** It uses clasp (via `npx -y @google/clasp@2`, nothing installed) to push `apps-script/` to the script project, then repoints the **existing** web-app deployment to a new version. The `/exec` URL baked into `index.html` never changes, so a backend deploy never requires a frontend change. Do NOT tell the user to copy-paste code into script.google.com — that workflow is retired.
+- Where the pieces live: `.clasp.json` (Script ID + `rootDir: apps-script`), `deploy.sh` (the web-app deployment ID, hardcoded — it is not a secret), `apps-script/appsscript.json` (project manifest; the web app's `executeAs: USER_DEPLOYING` / `access: ANYONE_ANONYMOUS` settings live here and deploy with the code).
+- Auth is per-machine: `npx -y @google/clasp@2 login` (credentials land in `~/.clasprc.json`, never in the repo). One-time setup steps are documented in the README's Deployment section. clasp is pinned to `@2` because 3.x renamed commands.
+- **The repo is the source of truth.** `clasp push` overwrites the entire online project, silently discarding any edits made in the script.google.com editor — never edit there. To check for suspected drift: `clasp pull` fetches the live code over the local files; inspect `git diff`, then `git restore apps-script/Code.gs` to keep the repo version.
+- Each deployment is tagged with the git short hash + commit subject, so Apps Script's "Manage deployments" history maps back to repo commits.
+- Verifying a deploy: `curl -sL '<exec URL>?action=members'` (no token) should return `{"ok":false,"error":"Unknown meeting"}`.
+- Manual fallback only if clasp/auth is broken: paste `Code.gs` into script.google.com, then Deploy → Manage deployments → edit → Deploy.
+- **Static page**: push `index.html` to `main` — GitHub Pages serves it at meetings.nhscc.com automatically, no build step.
+- **Sheet**: created once manually; all per-meeting tabs are auto-created by the script.
