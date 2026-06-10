@@ -388,6 +388,19 @@ test('closeExpiredMeetings flips expired meetings to closed and announces to Dis
   assert.equal(fetches.length, 1);
 });
 
+test('postToDiscord_ retries through a 429 rate limit and reports the final status', () => {
+  const { api, props, fetches, fetchResults } = loadCode();
+  props.set('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/test');
+
+  fetchResults.push(429, 204); // rate-limited once, then accepted
+  assert.equal(api.postToDiscord_('hello'), 204);
+  assert.equal(fetches.length, 2, 'retried after the 429');
+
+  fetchResults.push(429, 429, 429); // persistently rate-limited
+  assert.equal(api.postToDiscord_('hello again'), 429, 'gives up after 3 attempts and reports it');
+  assert.equal(fetches.length, 5);
+});
+
 test('closeExpiredMeetings without a webhook closes silently', () => {
   const { api, ss, fetches } = loadCode();
   seedMeeting(ss, { closesAt: past() });

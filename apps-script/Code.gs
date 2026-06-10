@@ -905,18 +905,29 @@ function announceClosedMeeting_(meetingName, tabName) {
 function postToDiscord_(content) {
   const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
   if (!url) return 0;
-  try {
-    const resp = UrlFetchApp.fetch(url, {
-      method:      'post',
-      contentType: 'application/json',
-      payload:     JSON.stringify({ content, username: 'NHSCC Meetings' }),
-      muteHttpExceptions: true,
-    });
-    return resp.getResponseCode();
-  } catch (err) {
-    // Discord being unreachable must never break sheet operations.
-    return 0;
+  let code = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = UrlFetchApp.fetch(url, {
+        method:      'post',
+        contentType: 'application/json',
+        payload:     JSON.stringify({ content, username: 'NHSCC Meetings' }),
+        muteHttpExceptions: true,
+      });
+      code = resp.getResponseCode();
+      if (code !== 429) return code;
+      // 429: Discord rate-limits per IP, and Apps Script egresses from
+      // Google's shared IPs — usually someone else's traffic, not ours.
+      // Honor Retry-After (seconds, capped) and try again.
+      const headers = resp.getHeaders ? resp.getHeaders() : {};
+      const wait = Number(headers['Retry-After'] || headers['retry-after']) || 2;
+      Utilities.sleep(Math.min(wait, 10) * 1000 + 250);
+    } catch (err) {
+      // Discord being unreachable must never break sheet operations.
+      return 0;
+    }
   }
+  return code; // still rate-limited after retries
 }
 
 // Prompt the organizer to choose a meeting. Returns { name, tab } or null.

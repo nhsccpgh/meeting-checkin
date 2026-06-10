@@ -109,6 +109,7 @@ function loadCode() {
   const cache   = new MockCache();
   const props   = new Map(); // script properties
   const fetches = [];        // recorded UrlFetchApp calls
+  const fetchResults = [];   // queued response codes for UrlFetchApp (default 200)
   const sandbox = {
     // Date must be the host's so `instanceof Date` works on test-seeded values.
     Date,
@@ -130,6 +131,7 @@ function loadCode() {
     Utilities: {
       getUuid: () => 'mock-uuid-' + Math.random().toString(36).slice(2),
       parseCsv: () => { throw new Error('parseCsv not mocked'); },
+      sleep: () => {},
     },
     PropertiesService: {
       getScriptProperties: () => ({
@@ -140,9 +142,15 @@ function loadCode() {
     },
     HtmlService: { createHtmlOutput: html => ({ html, setWidth() { return this; }, setHeight() { return this; } }) },
     UrlFetchApp: {
+      // Tests may queue status codes in fetchResults; default 200.
       fetch: (url, opts) => {
         fetches.push({ url, opts });
-        return { getResponseCode: () => 200, getContentText: () => '' };
+        const code = fetchResults.length ? fetchResults.shift() : 200;
+        return {
+          getResponseCode: () => code,
+          getContentText:  () => '',
+          getHeaders:      () => ({ 'Retry-After': '1' }),
+        };
       },
     },
     Logger: { log() {} },
@@ -150,11 +158,11 @@ function loadCode() {
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const api = vm.runInNewContext(
-    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup, createMeetingRecord, thirdWednesday, meetingNameExists, bulkCreateMonthly, closeExpiredMeetings })',
+    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup, createMeetingRecord, thirdWednesday, meetingNameExists, bulkCreateMonthly, closeExpiredMeetings, postToDiscord_ })',
     sandbox,
     { filename: 'Code.gs' }
   );
-  return { api, ss, cache, props, fetches };
+  return { api, ss, cache, props, fetches, fetchResults };
 }
 
 module.exports = { loadCode };
