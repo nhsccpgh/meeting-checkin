@@ -21,7 +21,11 @@ Digital self-service attendance system for the [North Hills Sports Car Club](htt
 ```
 index.html          — Static check-in page (hosted on GitHub Pages)
 apps-script/
-  Code.gs           — Google Apps Script web app (deployed from script.google.com)
+  Code.gs           — Google Apps Script web app (deployed via ./deploy.sh)
+  appsscript.json   — Apps Script project manifest (web-app settings)
+deploy.sh           — One-command backend deploy (clasp), self-verifying
+.clasp.json         — clasp config (Script ID)
+tests/              — Unit suite, run with: node --test tests/*.test.js
 ```
 
 ---
@@ -40,11 +44,11 @@ Vanilla HTML/CSS/JS — no framework, no build step. Hosted on GitHub Pages at t
 
 ### Google Apps Script (`apps-script/Code.gs`)
 
-Deployed from [script.google.com](https://script.google.com) as a Web App ("Execute as: me", "Who has access: Anyone"). Bound to the club Google Sheet.
+Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyone" — codified in `apps-script/appsscript.json`). Bound to the club Google Sheet.
 
 | Function | Description |
 |---|---|
-| `doGet(e)` | Returns meeting name, status, and check-in list as JSON (cached ~10s); `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead (requires an open meeting's token) |
+| `doGet(e)` | Returns meeting name, status, and check-in list as JSON (cached ~10s); `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead (requires an open meeting's token); `action=version` reports the deployed git hash |
 | `doPost(e)` | Validates token, checks open/closed status, matches the member to a barcode, appends a check-in row |
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
@@ -83,12 +87,13 @@ One additional tab is auto-created per meeting with columns: Timestamp, Name, So
 
 ## Setup (first time)
 
-1. Create a new Google Sheet for the club.
-2. Open **Extensions → Apps Script**, paste in `Code.gs`, and save.
-3. Run the `setup()` function once from the editor to create the Meetings tab.
-4. Deploy as a Web App (Deploy → New deployment → Web app). Copy the deployment URL.
-5. Paste the deployment URL into `index.html` as the `API` constant.
-6. Push `index.html` to the `main` branch — GitHub Pages serves it automatically.
+This stands up the whole system from scratch — it has already been done for the club's sheet. Day-to-day code changes only need `./deploy.sh` (see Deployment).
+
+1. Create a new Google Sheet for the club, then open **Extensions → Apps Script** to create its bound script project (it can start empty).
+2. Copy the Script ID (**Project Settings → Script ID**) into `.clasp.json`, then push the code: `npx -y @google/clasp@2 login` followed by `npx -y @google/clasp@2 push` (see Deployment for the one-time clasp setup).
+3. In the Apps Script editor, run `setup()` once (creates the Meetings and Members tabs) and `authorizeExternalRequest()` once (grants the URL-fetch permission Sync Members needs).
+4. Deploy as a Web App (Deploy → New deployment → Web app, "Execute as: me", "Who has access: Anyone"). Copy the deployment ID into `DEPLOYMENT_ID` in `deploy.sh`, and the `/exec` URL into `index.html` as the `API` constant.
+5. Push `index.html` to the `main` branch — GitHub Pages serves it automatically.
 
 ## Running a meeting
 

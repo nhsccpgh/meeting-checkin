@@ -52,6 +52,7 @@ Three independent components with no shared build toolchain:
 ## Testing
 
 - `node --test tests/*.test.js` runs the unit suite. `tests/gas-mocks.js` evaluates `Code.gs` in a vm sandbox against in-memory mocks of SpreadsheetApp/LockService/CacheService/ContentService; `tests/code.test.js` covers `doPost`/`doGet`, member matching, code resolution, time windows, and cache busting. Menu/dialog functions (anything touching `getUi()`) are untested by design.
+- `tests/helpers-sync.test.js` extracts the duplicated `normName`/HTML-escape helpers from BOTH `Code.gs` and `index.html` and asserts identical behavior — if you edit either copy, edit both or this fails CI.
 - CI (`.github/workflows/ci.yml`) runs the suite plus `node --check` syntax checks on both files on every push.
 - The mocks deliberately do NOT reproduce Sheets' quirks (date coercion, format-ignoring appends, vm-realm arrays are normalized in `appendRow`) — after meaningful `Code.gs` changes, still smoke-test against the live sheet: create a throwaway meeting, check in, delete the tab and index row.
 
@@ -62,7 +63,7 @@ Three independent components with no shared build toolchain:
 - Auth is per-machine: `npx -y @google/clasp@2 login` (credentials land in `~/.clasprc.json`, never in the repo). One-time setup steps are documented in the README's Deployment section. clasp is pinned to `@2` because 3.x renamed commands.
 - **The repo is the source of truth.** `clasp push` overwrites the entire online project, silently discarding any edits made in the script.google.com editor — never edit there. To check for suspected drift: `clasp pull` fetches the live code over the local files; inspect `git diff`, then `git restore apps-script/Code.gs` to keep the repo version.
 - Each deployment is tagged with the git short hash + commit subject, so Apps Script's "Manage deployments" history maps back to repo commits.
-- Verifying a deploy: `curl -sL '<exec URL>?action=members'` (no token) should return `{"ok":false,"error":"Unknown meeting"}`.
+- Deploys self-verify: `deploy.sh` bakes the git short hash into `DEPLOY_VERSION` in the deployed copy (the local file is restored afterward, so the repo never shows the hash) and then curls `<exec URL>?action=version` until the live endpoint reports that hash, failing loudly if it never does. A live response of `"version":"dev"` means someone pushed outside `./deploy.sh`.
 - Manual fallback only if clasp/auth is broken: paste `Code.gs` into script.google.com, then Deploy → Manage deployments → edit → Deploy.
 - **Static page**: push `index.html` to `main` — GitHub Pages serves it at meetings.nhscc.com automatically, no build step.
 - **Sheet**: created once manually; all per-meeting tabs are auto-created by the script.
