@@ -94,5 +94,19 @@ One additional tab is auto-created per meeting with columns: Timestamp, Name, So
 
 ## Deployment
 
-- **Apps Script:** redeploy from script.google.com after any code changes (Deploy → Manage deployments → edit → Deploy). The web app URL does not change between redeployments.
 - **Static page:** push to `main` — GitHub Pages deploys automatically, no build step.
+- **Apps Script:** run `./deploy.sh` after any `Code.gs` change. It pushes `apps-script/` to the script project and updates the live web-app deployment in place — the `/exec` URL never changes, so `index.html` needs no edits.
+
+### Apps Script deploy — one-time setup
+
+Uses [clasp](https://github.com/google/clasp) via `npx` (no install). Once per machine/account:
+
+1. Enable the Apps Script API for your account: https://script.google.com/home/usersettings
+2. `npx -y @google/clasp@2 login` (opens a browser for Google OAuth)
+3. In the Apps Script editor: **Project Settings → Script ID** — paste it into `.clasp.json`
+4. `npx -y @google/clasp@2 pull` once. This fetches `appsscript.json` (the project manifest — commit it) into `apps-script/`. It also overwrites `Code.gs` with what's currently deployed; run `git diff` after — any diff is drift between the repo and the live script, resolve it before your first push.
+5. `npx -y @google/clasp@2 deployments` — copy the web app's deployment ID (the line ending in `- web app`, **not** `@HEAD`) into `DEPLOYMENT_ID` in `deploy.sh`
+
+After that, every deploy is just `./deploy.sh`.
+
+Manual fallback: paste `Code.gs` into script.google.com and Deploy → Manage deployments → edit → Deploy.
