@@ -355,6 +355,49 @@ test('a bulk-created meeting is checkin-able end to end inside its window', () =
   assert.equal(ss.getSheetByName('Window Test').getLastRow(), 2);
 });
 
+test('closeExpiredMeetings flips expired meetings to closed and announces to Discord', () => {
+  const { api, ss, cache, props, fetches } = loadCode();
+  props.set('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/test');
+
+  seedMeeting(ss, { token: 'expired-tok', name: 'June 2026', tab: 'June 2026', closesAt: past(), code: '1111' });
+  seedMeeting(ss, { token: 'future-tok', tab: 'T2', closesAt: future(), code: '2222' });
+  seedMeeting(ss, { token: 'manual-tok', tab: 'T3', code: '3333' }); // no Closes At — manual close only
+  const tab = ss.insertSheet('June 2026');
+  tab.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Device', 'Notes']);
+  tab.appendRow([new Date(), 'Ann Yu', 'In person', '011', '1', '', '']);
+  tab.appendRow([new Date(), 'Bo Diaz', 'Zoom', '', '', '', '']); // unmatched
+  cache.put('roster:expired-tok', '{"ok":true}');
+
+  api.closeExpiredMeetings();
+
+  const idx = ss.getSheetByName('Meetings');
+  assert.equal(idx.data[1][3], 'closed', 'expired meeting flipped');
+  assert.equal(idx.data[2][3], 'open', 'future meeting untouched');
+  assert.equal(idx.data[3][3], 'open', 'no-Closes-At meeting untouched');
+  assert.ok(!cache.map.has('roster:expired-tok'), 'roster cache busted');
+
+  assert.equal(fetches.length, 1);
+  const payload = JSON.parse(fetches[0].opts.payload);
+  assert.ok(payload.content.includes('June 2026'), 'announces the meeting name');
+  assert.ok(payload.content.includes('2 checked in (1 in person, 1 Zoom)'), 'announces the counts');
+  assert.ok(payload.content.includes('1 unmatched name'), 'announces unmatched count');
+  assert.ok(payload.content.includes('https://sheets.test/spreadsheet#gid='), 'links to the tab');
+
+  // Idempotent: a second run finds nothing open+expired, so no second post.
+  api.closeExpiredMeetings();
+  assert.equal(fetches.length, 1);
+});
+
+test('closeExpiredMeetings without a webhook closes silently', () => {
+  const { api, ss, fetches } = loadCode();
+  seedMeeting(ss, { closesAt: past() });
+
+  api.closeExpiredMeetings();
+
+  assert.equal(ss.getSheetByName('Meetings').data[1][3], 'closed');
+  assert.equal(fetches.length, 0);
+});
+
 test('setup creates the Meetings and Members tabs with headers, and is idempotent', () => {
   const { api, ss } = loadCode();
   api.setup();

@@ -50,11 +50,15 @@ class MockRange {
   }
 }
 
+let nextSheetId = 100;
+
 class MockSheet {
   constructor(name) {
     this.name = name;
+    this.id   = nextSheetId++;
     this.data = []; // 2D array, row 0 = sheet row 1
   }
+  getSheetId() { return this.id; }
   _ensure(rows, cols) {
     while (this.data.length < rows) this.data.push([]);
     this.data.forEach(r => { while (r.length < cols) r.push(''); });
@@ -82,6 +86,7 @@ class MockSheet {
 
 class MockSpreadsheet {
   constructor() { this.sheets = new Map(); }
+  getUrl() { return 'https://sheets.test/spreadsheet'; }
   getSheetByName(name) { return this.sheets.get(name) || null; }
   insertSheet(name) {
     const sheet = new MockSheet(name);
@@ -100,8 +105,10 @@ class MockCache {
 // Evaluate Code.gs against fresh mocks. Returns { api, ss, cache } where api
 // holds the script's functions bound to this sandbox.
 function loadCode() {
-  const ss    = new MockSpreadsheet();
-  const cache = new MockCache();
+  const ss      = new MockSpreadsheet();
+  const cache   = new MockCache();
+  const props   = new Map(); // script properties
+  const fetches = [];        // recorded UrlFetchApp calls
   const sandbox = {
     // Date must be the host's so `instanceof Date` works on test-seeded values.
     Date,
@@ -124,19 +131,30 @@ function loadCode() {
       getUuid: () => 'mock-uuid-' + Math.random().toString(36).slice(2),
       parseCsv: () => { throw new Error('parseCsv not mocked'); },
     },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty() {} }) },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: k => (props.has(k) ? props.get(k) : null),
+        setProperty(k, v) { props.set(k, String(v)); },
+        deleteProperty(k) { props.delete(k); },
+      }),
+    },
     HtmlService: { createHtmlOutput: html => ({ html, setWidth() { return this; }, setHeight() { return this; } }) },
-    UrlFetchApp: { fetch: () => { throw new Error('fetch not mocked'); } },
+    UrlFetchApp: {
+      fetch: (url, opts) => {
+        fetches.push({ url, opts });
+        return { getResponseCode: () => 200, getContentText: () => '' };
+      },
+    },
     Logger: { log() {} },
   };
 
   const src = fs.readFileSync(path.join(__dirname, '..', 'apps-script', 'Code.gs'), 'utf8');
   const api = vm.runInNewContext(
-    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup, createMeetingRecord, thirdWednesday, meetingNameExists, bulkCreateMonthly })',
+    src + '\n;({ doGet, doPost, findMeeting, findMeetingByCode, isMeetingOpen, matchMember, listMembers, generateMeetingCode, normName, newMeetingTab, setup, createMeetingRecord, thirdWednesday, meetingNameExists, bulkCreateMonthly, closeExpiredMeetings })',
     sandbox,
     { filename: 'Code.gs' }
   );
-  return { api, ss, cache };
+  return { api, ss, cache, props, fetches };
 }
 
 module.exports = { loadCode };

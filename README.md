@@ -59,6 +59,8 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 | `fixMeetingTab()` | Repairs an existing meeting tab — fixes ID text formatting and re-pulls each check-in's barcode/Unique ID from the Members directory by name |
 | `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
 | `syncMembers()` | Fetches the timing-software CSV export from a (remembered, re-promptable) URL and rewrites the Members tab |
+| `discordAnnouncements()` | Stores a Discord webhook URL and installs the auto-close trigger; type DISABLE to turn off |
+| `closeExpiredMeetings()` | Time trigger (every 15 min): flips meetings past their Closes At to `closed` and announces the attendance summary to Discord |
 | `setup()` | One-time setup — creates the Meetings index and Members directory tabs with headers |
 
 ### Google Sheet (datastore)
@@ -76,6 +78,18 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 Synced from the timing-software CSV export (`UniqueID, Barcode, CarID, FirstName, LastName`). Only those identity columns are pulled in — the export's PII columns (address, email, phone) are ignored. The export URL changes per export (dated filename), so **Sync Members** prompts for it and remembers the last one used.
 
 One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID, Device, Notes. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form. `Notes` is never written by the system — it's a free column for the points master to annotate by hand. `Device` is a random per-browser tag so **Show Attendance** can flag several names checked in from one device (a nudge for the points admin, not a block — families legitimately share a phone).
+
+---
+
+## Discord announcements (optional)
+
+When a meeting closes — manually or by its Closes At time — a summary can be posted to a Discord channel: meeting name, check-in counts (in person / Zoom), unmatched names to review, and a link to the attendance tab. Counts only; member names stay in the Sheet.
+
+1. In Discord: channel → **Edit Channel → Integrations → Webhooks → New Webhook**. Name it (e.g. "NHSCC Check-In"), optionally set the club logo as its avatar, and **Copy Webhook URL**.
+2. In the Sheet: **NHSCC → Discord Announcements**, paste the URL. A test message posts immediately and a 15-minute timer is installed that closes + announces meetings past their Closes At.
+3. To turn it off: **NHSCC → Discord Announcements**, type `DISABLE`.
+
+The webhook URL is a secret (anyone holding it can post to the channel) — it lives in Script Properties, never in this repo.
 
 ---
 

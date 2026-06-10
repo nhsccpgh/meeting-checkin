@@ -91,6 +91,7 @@ function onOpen() {
     .addItem('Show Attendance', 'showAttendance')
     .addItem('Repair Barcodes', 'fixMeetingTab')
     .addItem('Sync Members',    'syncMembers')
+    .addItem('Discord Announcements', 'discordAnnouncements')
     .addToUi();
 }
 
@@ -196,7 +197,7 @@ function closeMeeting() {
   const open = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][COL.STATUS - 1] === 'open') {
-      open.push({ row: i + 1, name: display[i][COL.MEETING_NAME - 1], token: data[i][COL.TOKEN - 1] });
+      open.push({ row: i + 1, name: display[i][COL.MEETING_NAME - 1], token: data[i][COL.TOKEN - 1], tab: display[i][COL.TAB_NAME - 1] });
     }
   }
 
@@ -218,6 +219,7 @@ function closeMeeting() {
 
   sheet.getRange(open[idx].row, COL.STATUS).setValue('closed');
   CacheService.getScriptCache().remove('roster:' + open[idx].token); // phones see the close on the next poll
+  announceClosedMeeting_(open[idx].name, open[idx].tab);
   ui.alert(`"${open[idx].name}" is now closed.`);
 }
 
@@ -797,6 +799,114 @@ function syncMembers() {
   props.setProperty('MEMBERS_CSV_URL', url);
   CacheService.getScriptCache().remove('members'); // typeahead picks up the new list
   ui.alert(`Synced ${out.length} members from the CSV.`);
+}
+
+// ── Discord announcements ─────────────────────────────────────────────────────
+
+// Menu: store the channel webhook URL (Script Properties, never the repo) and
+// install the auto-close trigger. Type DISABLE to remove both.
+function discordAnnouncements() {
+  const ui    = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  const saved = props.getProperty('DISCORD_WEBHOOK_URL') || '';
+
+  const res = ui.prompt('Discord Announcements',
+    (saved ? 'A webhook is already configured.\n\n' : '') +
+    'Paste the Discord webhook URL (channel → Edit Channel → Integrations → Webhooks).\n' +
+    (saved ? 'Leave blank to keep the current one, or type DISABLE to turn announcements off:' : ''),
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  const text = res.getResponseText().trim();
+
+  if (text.toUpperCase() === 'DISABLE') {
+    props.deleteProperty('DISCORD_WEBHOOK_URL');
+    ScriptApp.getProjectTriggers().forEach(t => {
+      if (t.getHandlerFunction() === 'closeExpiredMeetings') ScriptApp.deleteTrigger(t);
+    });
+    ui.alert('Discord announcements disabled.');
+    return;
+  }
+
+  if (text) {
+    if (!/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\//.test(text)) {
+      ui.alert('That does not look like a Discord webhook URL — it should start with https://discord.com/api/webhooks/');
+      return;
+    }
+    props.setProperty('DISCORD_WEBHOOK_URL', text);
+  } else if (!saved) {
+    ui.alert('No webhook configured.');
+    return;
+  }
+
+  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'closeExpiredMeetings')) {
+    ScriptApp.newTrigger('closeExpiredMeetings').timeBased().everyMinutes(15).create();
+  }
+  postToDiscord_('✅ NHSCC check-in announcements are connected. Meetings will be announced here when they close.');
+  ui.alert('Discord announcements are on. A test message was just posted to the channel.\n\nMeetings announce when closed manually, or within ~15 minutes of their Closes At time.');
+}
+
+// Time-driven janitor (installed by Discord Announcements): flips meetings
+// whose Closes At has passed from 'open' to 'closed' — which also tidies the
+// index — and announces each one. Safe without a webhook: it closes silently.
+function closeExpiredMeetings() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(MEETINGS_TAB);
+  if (!sheet) return;
+  const range   = sheet.getDataRange();
+  const data    = range.getValues();
+  const display = range.getDisplayValues();
+  const now = new Date();
+  for (let i = 1; i < data.length; i++) {
+    // Only expired rows: open status, a real Closes At, and it has passed.
+    if (data[i][COL.STATUS - 1] !== 'open' || isMeetingOpen(data[i], now)) continue;
+    sheet.getRange(i + 1, COL.STATUS).setValue('closed');
+    CacheService.getScriptCache().remove('roster:' + data[i][COL.TOKEN - 1]);
+    announceClosedMeeting_(display[i][COL.MEETING_NAME - 1], display[i][COL.TAB_NAME - 1]);
+  }
+}
+
+// Post the closed meeting's attendance summary. Counts only — names stay in
+// the Sheet, one click away. Must never break the close itself.
+function announceClosedMeeting_(meetingName, tabName) {
+  try {
+    const ss  = SpreadsheetApp.getActiveSpreadsheet();
+    const tab = ss.getSheetByName(tabName);
+    let total = 0, inPerson = 0, zoom = 0, unmatched = 0;
+    if (tab && tab.getLastRow() > 1) {
+      const rows = tab.getDataRange().getDisplayValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (!String(rows[i][1] || '').trim()) continue;
+        total++;
+        if (String(rows[i][2]).trim() === 'Zoom') zoom++; else inPerson++;
+        if (!String(rows[i][3]).trim() && !String(rows[i][4]).trim()) unmatched++;
+      }
+    }
+    const link = tab ? `${ss.getUrl()}#gid=${tab.getSheetId()}` : ss.getUrl();
+    const msg = `📋 **${meetingName}** is closed — ${total} checked in` +
+      (total ? ` (${inPerson} in person, ${zoom} Zoom)` : '') +
+      (unmatched ? `. ${unmatched} unmatched name${unmatched === 1 ? '' : 's'} to review` : '') +
+      `.\nAttendance: <${link}>`;
+    postToDiscord_(msg);
+  } catch (err) {
+    // Announcing must never break closing.
+  }
+}
+
+// Raw webhook POST. The <> around links in messages suppress Discord's big
+// embed preview. No-op when no webhook is configured.
+function postToDiscord_(content) {
+  const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
+  if (!url) return;
+  try {
+    UrlFetchApp.fetch(url, {
+      method:      'post',
+      contentType: 'application/json',
+      payload:     JSON.stringify({ content, username: 'NHSCC Check-In' }),
+      muteHttpExceptions: true,
+    });
+  } catch (err) {
+    // Discord being unreachable must never break sheet operations.
+  }
 }
 
 // Prompt the organizer to choose a meeting. Returns { name, tab } or null.
