@@ -841,8 +841,14 @@ function discordAnnouncements() {
   if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'closeExpiredMeetings')) {
     ScriptApp.newTrigger('closeExpiredMeetings').timeBased().everyMinutes(15).create();
   }
-  postToDiscord_('✅ NHSCC check-in announcements are connected. Meetings will be announced here when they close.');
-  ui.alert('Discord announcements are on. A test message was just posted to the channel.\n\nMeetings announce when closed manually, or within ~15 minutes of their Closes At time.');
+  const status = postToDiscord_('✅ NHSCC check-in announcements are connected. Meetings will be announced here when they close.');
+  if (status >= 200 && status < 300) {
+    ui.alert('Discord accepted the test message — check the channel.\n\nMeetings announce when closed manually, or within ~15 minutes of their Closes At time.');
+  } else {
+    ui.alert(`Discord did NOT accept the test message (HTTP ${status || 'no response'}).\n\n` +
+      'The saved webhook URL is probably wrong or was deleted in Discord. ' +
+      'Copy it again from the channel (Edit Channel → Integrations → Webhooks) and re-run this menu item.');
+  }
 }
 
 // Time-driven janitor (installed by Discord Announcements): flips meetings
@@ -893,19 +899,23 @@ function announceClosedMeeting_(meetingName, tabName) {
 }
 
 // Raw webhook POST. The <> around links in messages suppress Discord's big
-// embed preview. No-op when no webhook is configured.
+// embed preview. Returns Discord's HTTP status (204 = accepted), or 0 when no
+// webhook is configured / the request couldn't be sent — callers that care
+// (setup) check it; callers that must not fail (closes) ignore it.
 function postToDiscord_(content) {
   const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
-  if (!url) return;
+  if (!url) return 0;
   try {
-    UrlFetchApp.fetch(url, {
+    const resp = UrlFetchApp.fetch(url, {
       method:      'post',
       contentType: 'application/json',
       payload:     JSON.stringify({ content, username: 'NHSCC Meetings' }),
       muteHttpExceptions: true,
     });
+    return resp.getResponseCode();
   } catch (err) {
     // Discord being unreachable must never break sheet operations.
+    return 0;
   }
 }
 
