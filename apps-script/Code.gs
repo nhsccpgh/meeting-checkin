@@ -114,7 +114,6 @@ function createMeeting() {
 
   const token     = Utilities.getUuid();
   const code      = generateMeetingCode();
-  const tabName   = meetingName.replace(/[\/\\?\*\[\]:]/g, '').substring(0, 100).trim();
   const now       = new Date();
   const opensAt   = opensText  ? new Date(opensText)  : '';
   const closesAt  = closesText ? new Date(closesText) : '';
@@ -122,11 +121,14 @@ function createMeeting() {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Create the per-meeting tab
-  let meetingSheet = ss.getSheetByName(tabName);
-  if (!meetingSheet) {
-    meetingSheet = newMeetingTab(ss, tabName);
+  // Never reuse an existing tab — that would interleave two meetings' check-ins
+  // in one sheet. If the name is taken (e.g. a recreated meeting), suffix it.
+  const baseTabName = meetingName.replace(/[\/\\?\*\[\]:]/g, '').substring(0, 94).trim();
+  let tabName = baseTabName;
+  for (let n = 2; ss.getSheetByName(tabName); n++) {
+    tabName = `${baseTabName} (${n})`;
   }
+  newMeetingTab(ss, tabName);
 
   // Append to the Meetings index
   ss.getSheetByName(MEETINGS_TAB)
@@ -279,8 +281,9 @@ function doPost(e) {
       if (meetingSheet.getLastRow() > 1) {
         const names = meetingSheet.getRange(2, 2, meetingSheet.getLastRow() - 1, 1).getValues();
         const nameLower = finalName.trim().toLowerCase();
+        // Already on the list — that's success from the member's point of view.
         if (names.some(r => String(r[0]).toLowerCase() === nameLower)) {
-          return jsonResponse({ ok: false, error: 'Already checked in' });
+          return jsonResponse({ ok: true, alreadyCheckedIn: true });
         }
       }
       // Format the target row's ID cells as text BEFORE writing, so values like
@@ -295,6 +298,9 @@ function doPost(e) {
       lock.releaseLock();
     }
 
+    // Bust the roster cache so the next poll shows this check-in immediately.
+    CacheService.getScriptCache().remove('roster:' + token);
+
     return jsonResponse({ ok: true });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.message });
@@ -306,8 +312,14 @@ function doGet(e) {
   try {
     if (!e || !e.parameter) return jsonResponse({ ok: false, error: 'No request parameters' });
 
-    // Member directory for the check-in typeahead (names only — no barcodes leave the server).
+    // Member directory for the check-in typeahead (names only — no barcodes leave
+    // the server). Requires an open meeting's token so the directory can't be
+    // enumerated from the bare API URL.
     if (e.parameter.action === 'members') {
+      const meeting = findMeeting(e.parameter.token);
+      if (!meeting || meeting.data[COL.STATUS - 1] !== 'open') {
+        return jsonResponse({ ok: false, error: 'Unknown meeting' });
+      }
       return jsonResponse({ ok: true, members: listMembers() });
     }
 
@@ -322,6 +334,15 @@ function doGet(e) {
 
     const token = e.parameter.token;
     if (!token) return jsonResponse({ ok: false, error: 'Missing token' });
+
+    // Serve the roster from cache when fresh — every phone polls every ~12s and
+    // would otherwise do a full spreadsheet read. doPost busts this on check-in,
+    // so only no-op polls hit the cache.
+    const cache = CacheService.getScriptCache();
+    if (e.parameter.action !== 'meta') {
+      const hit = cache.get('roster:' + token);
+      if (hit) return jsonResponse(JSON.parse(hit));
+    }
 
     const meeting = findMeeting(token);
     if (!meeting) return jsonResponse({ ok: false, error: 'Unknown meeting' });
@@ -347,7 +368,9 @@ function doGet(e) {
       }
     }
 
-    return jsonResponse({ ok: true, meetingName, status, checkins });
+    const payload = { ok: true, meetingName, status, checkins };
+    cache.put('roster:' + token, JSON.stringify(payload), 10);
+    return jsonResponse(payload);
   } catch (err) {
     return jsonResponse({ ok: false, error: err.message });
   }
@@ -401,6 +424,12 @@ function normName(s) {
 // Members-tab row number and q is the lowercase name for searching.
 // Barcodes are deliberately NOT included so they never reach the browser.
 function listMembers() {
+  // The directory only changes on Sync Members (which busts this), so cache it
+  // hard — this is fetched by every phone on page load.
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('members');
+  if (hit) return JSON.parse(hit);
+
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEMBERS_TAB);
   if (!sheet || sheet.getLastRow() < 2) return [];
   const rows = sheet.getDataRange().getDisplayValues();
@@ -410,6 +439,7 @@ function listMembers() {
     if (!name) continue;
     out.push({ i: i + 1, name, q: name.toLowerCase() });
   }
+  if (out.length) cache.put('members', JSON.stringify(out), 21600); // 6h
   return out;
 }
 
@@ -527,6 +557,7 @@ function syncMembers() {
   sheet.setFrozenRows(1);
 
   props.setProperty('MEMBERS_CSV_URL', url);
+  CacheService.getScriptCache().remove('members'); // typeahead picks up the new list
   ui.alert(`Synced ${out.length} members from the CSV.`);
 }
 

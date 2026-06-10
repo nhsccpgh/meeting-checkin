@@ -228,7 +228,7 @@ if (!token) {
 
 async function loadMembers() {
   try {
-    const res  = await fetch(`${API}?action=members`);
+    const res  = await fetch(`${API}?action=members&token=${encodeURIComponent(token)}`);
     const data = await res.json();
     if (data.ok && Array.isArray(data.members)) members = data.members;
   } catch (_) {
@@ -517,12 +517,16 @@ async function submitCheckin() {
 
     if (data.ok) {
       statusMsg.className  = 'ok';
-      statusMsg.textContent = `Checked in as "${name}".`;
+      statusMsg.textContent = data.alreadyCheckedIn
+        ? `You're already checked in — all set.`
+        : `Checked in as "${name}".`;
       localStorage.setItem('nhscc-name', name);
       nameInput.value = '';
-      // Show the new entry instantly; the next poll reconciles with the server.
-      roster = roster.concat([{ name, source, timestamp: new Date().toISOString() }]);
-      renderRoster(roster);
+      if (!data.alreadyCheckedIn) {
+        // Show the new entry instantly; the next poll reconciles with the server.
+        roster = roster.concat([{ name, source, timestamp: new Date().toISOString() }]);
+        renderRoster(roster);
+      }
     } else {
       statusMsg.className  = 'err';
       statusMsg.textContent = data.error || 'Check-in failed. Try again.';

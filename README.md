@@ -44,7 +44,7 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 
 | Function | Description |
 |---|---|
-| `doGet(e)` | Returns meeting name, status, and check-in list as JSON; `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead |
+| `doGet(e)` | Returns meeting name, status, and check-in list as JSON (cached ~10s); `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead (requires an open meeting's token) |
 | `doPost(e)` | Validates token, checks open/closed status, matches the member to a barcode, appends a check-in row |
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
