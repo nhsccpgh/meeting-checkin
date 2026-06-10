@@ -40,7 +40,7 @@ test('check-in happy path: title-cases the name, matches the member, creates the
 
   const tab = ss.getSheetByName('June 2026');
   assert.ok(tab, 'meeting tab is created defensively when missing');
-  assert.deepEqual(tab.data[0], ['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes', 'Device']);
+  assert.deepEqual(tab.data[0], ['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Device', 'Notes']);
   const [ts, name, source, barcode, uniqueId] = tab.data[1];
   assert.ok(ts instanceof Date);
   assert.equal(name, 'Matt Simmons'); // canonical directory name, title-cased input matched
@@ -93,7 +93,7 @@ test('duplicate check-in is success with alreadyCheckedIn, and writes no second 
   assert.equal(ss.getSheetByName('June 2026').getLastRow(), 2); // header + one check-in
 });
 
-test('doPost records a sanitized device tag in column 7 and never touches Notes', () => {
+test('doPost records a sanitized device tag in column 6 and never touches Notes (last column)', () => {
   const { api, ss } = loadCode();
   seedMeeting(ss);
 
@@ -102,13 +102,13 @@ test('doPost records a sanitized device tag in column 7 and never touches Notes'
   post(api, { token: 'tok-1', name: 'Cy Moss', source: 'Zoom' }); // no device — allowed
 
   const tab = ss.getSheetByName('June 2026');
-  assert.equal(tab.data[1][6], 'abc-DEF_123');
-  assert.equal(tab.data[2][6], 'weirdtag', 'device tag is stripped to word chars and dashes');
-  assert.equal(tab.data[3][6] ?? '', '');
+  assert.equal(tab.data[1][5], 'abc-DEF_123');
+  assert.equal(tab.data[2][5], 'weirdtag', 'device tag is stripped to word chars and dashes');
+  assert.equal(tab.data[3][5] ?? '', '');
   for (const row of [tab.data[1], tab.data[2], tab.data[3]]) {
     // ?? '' because the mock leaves never-written trailing cells undefined,
     // where real Sheets reads ''.
-    assert.equal(row[5] ?? '', '', 'Notes column stays untouched');
+    assert.equal(row[6] ?? '', '', 'Notes column stays untouched');
   }
 });
 

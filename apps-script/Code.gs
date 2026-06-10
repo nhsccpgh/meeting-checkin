@@ -489,10 +489,10 @@ function doPost(e) {
       meetingSheet.getRange(targetRow, 4, 1, 2).setNumberFormat('@');          // Barcode ID + Unique ID (preserve "083")
       meetingSheet.getRange(targetRow, 1, 1, 5)
         .setValues([[now, finalName.trim(), source, barcode, uniqueId]]);
-      // Device tag goes in column 7 — written separately so column 6 (Notes)
-      // is never touched by the system.
+      // Device tag goes in column 6 — written separately so Notes (column 7,
+      // always last) is never touched by the system.
       if (device) {
-        meetingSheet.getRange(targetRow, 7).setNumberFormat('@').setValue(device);
+        meetingSheet.getRange(targetRow, 6).setNumberFormat('@').setValue(device);
       }
     } finally {
       lock.releaseLock();
@@ -716,11 +716,11 @@ function newMeetingTab(ss, tabName) {
   const sheet = ss.insertSheet(tabName);
   // 'Notes' is intentionally left blank by the system — it's a free column for
   // the points master to annotate check-ins by hand.
-  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes', 'Device']);
+  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Device', 'Notes']);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 4, sheet.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
-  sheet.getRange(1, 7, sheet.getMaxRows()).setNumberFormat('@');    // Device
-  sheet.setColumnWidth(6, 280); // Notes
+  sheet.getRange(1, 6, sheet.getMaxRows()).setNumberFormat('@');    // Device
+  sheet.setColumnWidth(7, 280); // Notes — always the last column
   return sheet;
 }
 
@@ -850,11 +850,11 @@ function fixMeetingTab() {
   if (!tab) { ui.alert(`Tab "${meeting.tab}" not found.`); return; }
 
   // Normalize headers + formatting.
-  tab.getRange(1, 1, 1, 7).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes', 'Device']]);
+  tab.getRange(1, 1, 1, 7).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Device', 'Notes']]);
   tab.setFrozenRows(1);
   tab.getRange(2, 1, Math.max(tab.getMaxRows() - 1, 1), 1).setNumberFormat('M/d/yyyy H:mm:ss'); // reveal stored time
   tab.getRange(1, 4, tab.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
-  tab.getRange(1, 7, tab.getMaxRows()).setNumberFormat('@');    // Device
+  tab.getRange(1, 6, tab.getMaxRows()).setNumberFormat('@');    // Device
 
   const last = tab.getLastRow();
   if (last < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
@@ -891,7 +891,7 @@ function showAttendance() {
   const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
   if (!tab || tab.getLastRow() < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
 
-  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID, Unique ID, Notes, Device
+  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID, Unique ID, Device, Notes
   const matched   = [];
   const unmatched = [];
   const byDevice  = {};
@@ -899,7 +899,7 @@ function showAttendance() {
     const name     = String(rows[i][1] || '').trim();
     const barcode  = String(rows[i][3] || '').trim();
     const uniqueId = String(rows[i][4] || '').trim();
-    const device   = String(rows[i][6] || '').trim();
+    const device   = String(rows[i][5] || '').trim();
     if (!name) continue;
     if (barcode || uniqueId) matched.push({ barcode, uniqueId, name });
     else                     unmatched.push(name);

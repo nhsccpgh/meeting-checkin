@@ -75,7 +75,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 
 Synced from the timing-software CSV export (`UniqueID, Barcode, CarID, FirstName, LastName`). Only those identity columns are pulled in — the export's PII columns (address, email, phone) are ignored. The export URL changes per export (dated filename), so **Sync Members** prompts for it and remembers the last one used.
 
-One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID, Notes, Device. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form. `Notes` is never written by the system — it's a free column for the points master to annotate by hand. `Device` is a random per-browser tag so **Show Attendance** can flag several names checked in from one device (a nudge for the points admin, not a block — families legitimately share a phone).
+One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID, Device, Notes. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form. `Notes` is never written by the system — it's a free column for the points master to annotate by hand. `Device` is a random per-browser tag so **Show Attendance** can flag several names checked in from one device (a nudge for the points admin, not a block — families legitimately share a phone).
 
 ---
 
