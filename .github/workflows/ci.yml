@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax-check Code.gs
+        run: cp apps-script/Code.gs /tmp/Code.js && node --check /tmp/Code.js
+
+      - name: Syntax-check the check-in page script
+        run: |
+          perl -0777 -ne 'print $1 if /<script>(.*)<\/script>/s' index.html > /tmp/checkin.js
+          test -s /tmp/checkin.js
+          node --check /tmp/checkin.js
+
+      - name: Unit tests
+        run: node --test tests/*.test.js

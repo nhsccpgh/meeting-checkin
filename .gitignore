@@ -1,0 +1,4 @@
+.DS_Store
+# clasp OAuth credentials — must never be committed (normally in ~, but
+# `clasp login --creds` would drop one here)
+.clasprc.json
