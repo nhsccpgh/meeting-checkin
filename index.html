@@ -55,7 +55,8 @@
       margin-bottom: 6px;
     }
 
-    input[type="text"] {
+    input[type="text"],
+    input[type="search"] {
       width: 100%;
       padding: 10px 12px;
       font-size: 1rem;
@@ -65,7 +66,15 @@
       transition: border-color .15s;
     }
 
-    input[type="text"]:focus { border-color: #c9a84c; }
+    input[type="text"]:focus,
+    input[type="search"]:focus { border-color: #c9a84c; }
+
+    /* Undo Safari's native search-field chrome so it looks like a text input */
+    input[type="search"] { -webkit-appearance: none; appearance: none; }
+    input[type="search"]::-webkit-search-decoration,
+    input[type="search"]::-webkit-search-cancel-button,
+    input[type="search"]::-webkit-search-results-button,
+    input[type="search"]::-webkit-search-results-decoration { display: none; }
 
     input.code-input {
       text-align: center;
@@ -241,7 +250,7 @@ function normName(s) {
 }
 
 function wireTypeahead() {
-  const input = document.getElementById('name-input');
+  const input = document.getElementById('who-input');
   const box   = document.getElementById('suggest');
   if (!input || !box) return;
 
@@ -419,11 +428,13 @@ function renderForm(status) {
   card.id = 'form-card';
   card.innerHTML = `
     <h2>Check In</h2>
-    <label for="name-input">Your name</label>
+    <label for="who-input">Who's checking in?</label>
     <div class="typeahead">
-      <input type="text" id="name-input" placeholder="Start typing your name…"
+      <!-- type="search" + no "name"/contact words in id/label/placeholder keeps
+           Safari from overlaying its Contacts AutoFill panel on the typeahead -->
+      <input type="search" id="who-input" placeholder="Start typing…" enterkeyhint="go"
              role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggest"
-             autocomplete="new-password" autocapitalize="words" autocorrect="off" spellcheck="false">
+             autocomplete="off" autocapitalize="words" autocorrect="off" spellcheck="false">
       <div id="suggest" class="suggest" role="listbox" hidden></div>
     </div>
     <div class="toggle">
@@ -439,13 +450,13 @@ function renderForm(status) {
 
   wireTypeahead();
   document.getElementById('submit-btn').addEventListener('click', submitCheckin);
-  document.getElementById('name-input').addEventListener('keydown', e => {
+  document.getElementById('who-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') submitCheckin();
   });
 
   // Pre-fill name from last check-in on this device
   const savedName = localStorage.getItem('nhscc-name');
-  if (savedName) document.getElementById('name-input').value = savedName;
+  if (savedName) document.getElementById('who-input').value = savedName;
 }
 
 function renderRoster(checkins) {
@@ -487,7 +498,7 @@ function handleApiError(err) {
 // ── Check-in submit ───────────────────────────────────────────────────────────
 
 async function submitCheckin() {
-  const nameInput = document.getElementById('name-input');
+  const nameInput = document.getElementById('who-input');
   const statusMsg = document.getElementById('status-msg');
   const submitBtn = document.getElementById('submit-btn');
   const source    = document.querySelector('input[name="source"]:checked').value;
