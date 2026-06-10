@@ -58,6 +58,9 @@ function setup() {
   sheet.getRange(1, COL.MEETING_NAME, sheet.getMaxRows()).setNumberFormat('@');
   sheet.getRange(1, COL.TAB_NAME,     sheet.getMaxRows()).setNumberFormat('@');
   sheet.getRange(1, COL.CODE,         sheet.getMaxRows()).setNumberFormat('@');
+  // Show times on the meeting windows (dates written via setValues display
+  // date-only otherwise). Covers Opens At, Closes At, Created At.
+  sheet.getRange(1, COL.OPENS_AT, sheet.getMaxRows(), 3).setNumberFormat('M/d/yyyy H:mm');
 
   // Members directory — populated by NHSCC → Sync Members from the CSV export.
   let members = ss.getSheetByName(MEMBERS_TAB);
@@ -150,6 +153,8 @@ function createMeetingRecord(meetingName, opensAt, closesAt) {
   const row   = index.getLastRow() + 1;
   index.getRange(row, COL.MEETING_NAME, 1, 2).setNumberFormat('@'); // Meeting Name + Tab Name
   index.getRange(row, COL.CODE).setNumberFormat('@');
+  // Dates written via setValues display date-only without an explicit format.
+  index.getRange(row, COL.OPENS_AT, 1, 3).setNumberFormat('M/d/yyyy H:mm'); // Opens At, Closes At, Created At
   index.getRange(row, 1, 1, 9)
     .setValues([[token, meetingName, tabName, 'open', opensAt || '', closesAt || '', new Date(), checkinUrl, code]]);
 
