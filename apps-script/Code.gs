@@ -901,7 +901,7 @@ function postToDiscord_(content) {
     UrlFetchApp.fetch(url, {
       method:      'post',
       contentType: 'application/json',
-      payload:     JSON.stringify({ content, username: 'NHSCC Check-In' }),
+      payload:     JSON.stringify({ content, username: 'NHSCC Meetings' }),
       muteHttpExceptions: true,
     });
   } catch (err) {
