@@ -48,7 +48,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 
 | Function | Description |
 |---|---|
-| `doGet(e)` | Returns meeting name, status, and check-in list as JSON (cached ~10s); `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead (requires an open meeting's token); `action=version` reports the deployed git hash |
+| `doGet(e)` | Returns meeting name, status, and check-in list as JSON (cached ~10s); reports `notYetOpen` + the open time before a meeting's Opens At; `action=resolve&code=NNNN` maps a backup code to a token; `action=members` returns the directory names for the typeahead (requires an open meeting's token); `action=version` reports the deployed git hash |
 | `doPost(e)` | Validates token, checks open/closed status, matches the member to a barcode, appends a check-in row |
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
@@ -99,7 +99,7 @@ This stands up the whole system from scratch — it has already been done for th
 
 1. Open the Google Sheet and go to **NHSCC → New Meeting**.
 2. Enter the meeting name (e.g. `May 2026 Autocross`).
-3. Optionally enter open/close times (MM/DD/YYYY HH:MM). Leave blank to open immediately / close manually.
+3. Optionally enter open/close times (MM/DD/YYYY HH:MM). Leave blank to open immediately / close manually. With both times set, the meeting runs itself — you can create a whole year of meetings in advance: before the open time the page tells visitors when check-in starts (and flips to the form automatically); after the close time check-ins are rejected and the code stops resolving.
 4. Copy the URL from the dialog and paste it into Zoom chat. Project the QR code for in-person members, and read the 4-digit backup code aloud for anyone who can't scan it.
 5. When sign-in is complete, use **NHSCC → Close Meeting**. (Closed by mistake? **NHSCC → Reopen Meeting** undoes it.)
 

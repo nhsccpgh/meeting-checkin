@@ -122,6 +122,33 @@ test('doGet returns the roster', () => {
   assert.equal(res.checkins[0].source, 'Zoom');
 });
 
+test('doGet reports notYetOpen with the open time for a future Opens At', () => {
+  const { api, ss } = loadCode();
+  const opens = future();
+  seedMeeting(ss, { opensAt: opens });
+
+  const res = get(api, { token: 'tok-1' });
+  assert.equal(res.status, 'notYetOpen');
+  assert.equal(res.opensAt, opens.toISOString());
+  assert.equal(get(api, { token: 'tok-1', action: 'meta' }).status, 'notYetOpen');
+});
+
+test('a passed Opens At is plain open', () => {
+  const { api, ss } = loadCode();
+  seedMeeting(ss, { opensAt: past() });
+
+  const res = get(api, { token: 'tok-1' });
+  assert.equal(res.status, 'open');
+  assert.equal(res.opensAt, '');
+});
+
+test('a not-yet-open meeting still resolves by code, so QRs/codes work in advance', () => {
+  const { api, ss } = loadCode();
+  seedMeeting(ss, { token: 'early-tok', opensAt: future(), code: '4321' });
+
+  assert.deepEqual(get(api, { action: 'resolve', code: '4321' }), { ok: true, token: 'early-tok' });
+});
+
 test('doGet reports a time-expired meeting as closed even though Status still says open', () => {
   const { api, ss } = loadCode();
   seedMeeting(ss, { closesAt: past() });

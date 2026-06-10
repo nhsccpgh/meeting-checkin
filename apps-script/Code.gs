@@ -429,8 +429,22 @@ function doGet(e) {
     // 'open' — keeps the page from offering a form that doPost would reject.
     if (status === 'open' && !isMeetingOpen(meeting.data)) status = 'closed';
 
+    // A future Opens At is its own state: the page shows when check-in starts
+    // instead of a form doPost would reject. Deliberately NOT folded into
+    // isMeetingOpen — resolve and Show QR still include these meetings so QRs
+    // and codes work when meetings are created well in advance.
+    let opensAt = '';
+    if (status === 'open') {
+      const raw   = meeting.data[COL.OPENS_AT - 1];
+      const opens = raw instanceof Date ? raw : (raw ? new Date(raw) : null);
+      if (opens && !isNaN(opens.getTime()) && new Date() < opens) {
+        status  = 'notYetOpen';
+        opensAt = opens.toISOString();
+      }
+    }
+
     if (e.parameter.action === 'meta') {
-      return jsonResponse({ ok: true, meetingName, status });
+      return jsonResponse({ ok: true, meetingName, status, opensAt });
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -448,7 +462,7 @@ function doGet(e) {
       }
     }
 
-    const payload = { ok: true, meetingName, status, checkins };
+    const payload = { ok: true, meetingName, status, checkins, opensAt };
     cache.put('roster:' + token, JSON.stringify(payload), 10);
     return jsonResponse(payload);
   } catch (err) {

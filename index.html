@@ -216,6 +216,7 @@ const main   = document.getElementById('main');
 const nameEl = document.getElementById('meeting-name');
 
 let pollTimer = null;
+let openTimer = null; // re-check scheduled for a not-yet-open meeting's start time
 let roster    = [];   // last-known check-ins, for optimistic updates
 let members   = [];   // [{ i, name, q }] for the name typeahead
 let selectedMember = null; // the member the user picked from the list, if any
@@ -403,7 +404,7 @@ async function loadRoster() {
     nameEl.textContent = data.meetingName;
     document.title     = `NHSCC — ${data.meetingName}`;
 
-    renderForm(data.status);
+    renderForm(data.status, data.opensAt);
     renderRoster(data.checkins);
 
     if (data.status === 'open') schedulePoll();
@@ -417,6 +418,20 @@ function schedulePoll() {
   clearTimeout(pollTimer);
   if (document.hidden) return; // pause while tab is backgrounded — saves Apps Script quota
   pollTimer = setTimeout(pollOnce, POLL_MS);
+}
+
+// Re-check a not-yet-open meeting right when it opens (+2s for the server's
+// roster cache to expire). Clamped to 6h so a meeting created months in
+// advance re-checks periodically instead of arming one giant timer (setTimeout
+// overflows past ~24 days); if the re-check still says notYetOpen, renderForm
+// schedules the next one.
+function scheduleOpenCheck(opensAtIso) {
+  clearTimeout(openTimer);
+  const opensAt = opensAtIso ? Date.parse(opensAtIso) : NaN;
+  const delay = isNaN(opensAt)
+    ? 60 * 1000
+    : Math.min(Math.max(opensAt - Date.now() + 2000, 2000), 6 * 3600 * 1000);
+  openTimer = setTimeout(loadRoster, delay);
 }
 
 async function pollOnce() {
@@ -446,8 +461,22 @@ document.addEventListener('visibilitychange', () => {
 
 // ── Render helpers ────────────────────────────────────────────────────────────
 
-function renderForm(status) {
+function renderForm(status, opensAtIso) {
   const existing = document.getElementById('form-card');
+
+  if (status === 'notYetOpen') {
+    const card = existing || document.createElement('div');
+    card.className = 'card';
+    card.id = 'form-card';
+    const when = opensAtIso ? new Date(opensAtIso) : null;
+    const whenText = when && !isNaN(when)
+      ? when.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : null;
+    card.innerHTML = `<p class="message">Check-in hasn&rsquo;t opened yet${whenText ? ` &mdash; it opens ${esc(whenText)}` : ''}.<br>This page will update on its own.</p>`;
+    if (!existing) main.prepend(card);
+    scheduleOpenCheck(opensAtIso);
+    return;
+  }
 
   if (status !== 'open') {
     // Replace any optimistically-shown form with the closed notice.
@@ -459,7 +488,10 @@ function renderForm(status) {
     return;
   }
 
-  if (existing) return; // form already shown
+  // The real form is already up — nothing to do. (A bare #form-card might be
+  // the notYetOpen notice flipping to open: rebuild it as the form.)
+  if (existing && document.getElementById('who-input')) return;
+  if (existing) existing.remove();
 
   const card = document.createElement('div');
   card.className = 'card';
