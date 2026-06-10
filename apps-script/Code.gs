@@ -719,7 +719,10 @@ function newMeetingTab(ss, tabName) {
   sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Device', 'Notes']);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 4, sheet.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
-  sheet.getRange(1, 6, sheet.getMaxRows()).setNumberFormat('@');    // Device
+  // Device: text format, and CLIP so long tags don't visually overflow into Notes.
+  sheet.getRange(1, 6, sheet.getMaxRows()).setNumberFormat('@')
+       .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+  sheet.setColumnWidth(6, 110); // Device
   sheet.setColumnWidth(7, 280); // Notes — always the last column
   return sheet;
 }
@@ -854,7 +857,9 @@ function fixMeetingTab() {
   tab.setFrozenRows(1);
   tab.getRange(2, 1, Math.max(tab.getMaxRows() - 1, 1), 1).setNumberFormat('M/d/yyyy H:mm:ss'); // reveal stored time
   tab.getRange(1, 4, tab.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
-  tab.getRange(1, 6, tab.getMaxRows()).setNumberFormat('@');    // Device
+  tab.getRange(1, 6, tab.getMaxRows()).setNumberFormat('@')     // Device
+     .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+  tab.setColumnWidth(6, 110); // Device
 
   const last = tab.getLastRow();
   if (last < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }

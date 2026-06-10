@@ -20,6 +20,7 @@ class MockRange {
     this.numCols = numCols;
   }
   setNumberFormat() { return this; }
+  setWrapStrategy() { return this; }
   setValue(v) { return this.setValues([[v]]); }
   setValues(vals) {
     this.sheet._ensure(this.row - 1 + vals.length, this.col - 1 + Math.max(...vals.map(r => r.length)));
@@ -107,6 +108,7 @@ function loadCode() {
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ss,
       getUi: () => { throw new Error('getUi() is not available in tests — menu functions are untested by design'); },
+      WrapStrategy: { CLIP: 'CLIP', WRAP: 'WRAP', OVERFLOW: 'OVERFLOW' },
     },
     CacheService: { getScriptCache: () => cache },
     LockService:  { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
