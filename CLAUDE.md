@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-NHSCC Meeting Check-In System — digital self-service attendance for the North Hills Sports Car Club's monthly autocross meetings. Replaces paper sign-in sheets.
+NHSCC Meeting Check-In System — digital self-service attendance for the North Hills Sports Car Club's monthly autocross meetings. Replaces paper sign-in sheets. Members scan a QR code (or enter a 4-digit code read aloud) and check themselves in; the points admin matches attendance to timing-software barcodes afterward.
 
 Deliberately **out of scope**: MotorsportReg (MSR) integration and Google Forms. Do not add them.
 
@@ -13,44 +13,44 @@ Deliberately **out of scope**: MotorsportReg (MSR) integration and Google Forms.
 Three independent components with no shared build toolchain:
 
 ### 1. Static check-in page (`index.html`)
-- Vanilla HTML/CSS/JS, no framework, no build step
-- Hosted on GitHub Pages
-- Single page parameterized by `?m=<uuid>` query token
-- Fetches roster via `GET` on load, polls every ~12s; submits check-ins via `POST`
-- Renders QR codes client-side using qrcodejs from CDN (do NOT use Google's retired Chart API QR endpoint)
+- Vanilla HTML/CSS/JS in one file, no framework, no build step; GitHub Pages serves it at meetings.nhscc.com
+- Parameterized by `?m=<uuid>` token; with no token it shows a 4-digit backup-code entry that resolves to a token via `action=resolve`
+- Renders the form optimistically before the first roster fetch returns (Apps Script round-trips are ~1.7s); `loadRoster()` corrects if the token is bad or the meeting closed
+- Name field is a typeahead over the member directory (`action=members`); picking an entry sends `memberIndex` so the server can attach the exact barcode
+- Polls the roster every ~12s, pauses while the tab is hidden, resumes on visibilitychange; successful check-ins update the roster optimistically
+- Remembers the last name used in `localStorage` key `nhscc-name`
+- QR codes render client-side with qrcodejs from CDN (do NOT use Google's retired Chart API QR endpoint)
 
 ### 2. Google Apps Script web app (`apps-script/Code.gs`)
 - Google's JavaScript runtime — deployed as a Web App via `./deploy.sh` (clasp; see Deployment)
 - Deploy settings ("Execute as: me", "Who has access: Anyone") are codified in `apps-script/appsscript.json`
-- `doGet(e)` — returns meeting name, status, and check-ins list as JSON; supports `action=meta` for metadata only
-- `doPost(e)` — validates token, checks open/close status and time window, acquires LockService lock, appends row to meeting tab
-- `onOpen()` — adds "NHSCC" custom menu with "New Meeting" and "Close Meeting" items
-- `createMeeting()` — prompts for name/times, generates UUID token (`Utilities.getUuid()`), creates per-meeting tab, appends Meetings index row, shows dialog with check-in URL + QR
-- `closeMeeting()` — sets Status to `closed`; dead tokens reject further check-ins
-- `findMeeting(token)` — helper that looks up index row by token, returns it or null
+- `doGet(e)` — returns meeting name, status, and check-ins as JSON (cached ~10s per token in CacheService); `action=meta` for metadata only; `action=resolve&code=NNNN` maps a backup code to a token (open meetings only); `action=members` returns directory names for the typeahead — **requires an open meeting's token** so the club roster can't be enumerated, and never includes barcodes
+- `doPost(e)` — validates token, status, and open/close time window; resolves the member (picked `memberIndex` first, normalized-name match as fallback, ambiguous names left unmatched); duplicate names return `ok: true, alreadyCheckedIn: true` (not an error); appends under a LockService lock, then busts the roster cache
+- Organizer menu (`onOpen`): New Meeting, Show QR, Close Meeting, Show Attendance (sorted barcodes for the points admin), Repair Barcodes (re-derives ID columns from the directory), Sync Members (imports the timing-software CSV from a remembered URL)
+- `createMeeting()` — UUID token + unique 4-digit code; never reuses an existing tab (suffixes "(2)" instead — reuse would interleave two meetings' check-ins)
 
 ### 3. Google Sheet (datastore)
-- `Meetings` tab (index): Token, Meeting Name, Tab Name, Status, Opens At, Closes At, Created At, Check-in URL
-- One auto-created tab per meeting with columns: Timestamp, Name, Source (`In person` or `Zoom`)
+- `Meetings` tab (index): Token, Meeting Name, Tab Name, Status, Opens At, Closes At, Created At, Check-in URL, Code
+- `Members` tab (directory): Unique ID, Barcode, Name — rewritten by Sync Members from the timing-software CSV (`UniqueID, Barcode, CarID, FirstName, LastName`); PII columns from the export are deliberately not imported; not edited by hand
+- One auto-created tab per meeting: Timestamp, Name, Source (`In person` or `Zoom`), Barcode ID, Unique ID, Notes. `Notes` is never written by the system — it's the points admin's free annotation column
 - The club's points tracker reads this sheet directly
 
 ## Implementation gotchas
 
-- **CORS preflight**: send `POST` body as `text/plain` or form-encoded — Apps Script does not handle OPTIONS preflights. Plain `GET` returning JSON is CORS-clean.
-- **Concurrent writes**: wrap row appends in `LockService` to prevent row collisions from simultaneous scans.
-- **Tab creation**: `createMeeting()` creates the tab up front; `doPost` can create it defensively if missing.
-- **Polling, not push**: Apps Script cannot push; the live roster polls ~12s intervals.
-- **Token security**: UUIDs stop guessing; open/close time windows mitigate sharing of valid tokens.
+- **CORS preflight**: send `POST` body as `text/plain` — Apps Script does not handle OPTIONS preflights. Plain `GET` returning JSON is CORS-clean.
+- **Concurrent writes**: row appends stay wrapped in `LockService`; the duplicate guard runs inside the lock.
+- **Sheets mangles values**: "May 2026" auto-converts to a Date and "083" loses its zero. ID/name columns are text-formatted (`@`), and reads use `getDisplayValues()` where the string form matters. `appendRow` does not reliably honor column formats — format the exact target row before `setValues` (see `doPost`).
+- **Caching**: CacheService holds the roster ~10s per token (busted by `doPost`) and the members list 6h (busted by Sync Members). If you add a write path, bust the matching key, or check-ins will look delayed.
+- **Safari Contacts AutoFill**: the name field is `type="search"` with id `who-input` and no "name"/contact vocabulary in the id, label, or placeholder. Safari ignores `autocomplete="off"` and overlays its Contacts panel on anything that heuristically looks like a name field — keep it this way.
+- **Barcodes never reach the browser**: `action=members` sends names only; barcode/Unique ID attachment happens server-side in `matchMember`.
+- **Duplicated helpers**: `normName()` and the HTML-escape function exist in both `Code.gs` and `index.html` and must stay in sync — the server matches on its copy, the client filters on its own.
+- **Token security**: UUIDs stop guessing; open/close time windows limit sharing. The 4-digit code is brute-forceable by design tradeoff — it only resolves open meetings, so don't widen what it unlocks.
+- **Polling, not push**: Apps Script cannot push; the roster polls ~12s.
+- **closeMeeting vs closesAt**: a passed `Closes At` time blocks check-ins but does NOT flip Status to `closed` — the index row stays `open` until Close Meeting is used.
 
-## Suggested build order
+## Testing
 
-1. Google Sheet: `Meetings` tab with column headers
-2. Apps Script skeleton: `doPost` + automatic tab creation + LockService
-3. `onOpen()` + `createMeeting()` (token, tab, index row, URL/QR dialog)
-4. Static check-in page: token parsing, form, `POST`
-5. `doGet()` + live polling roster on page
-6. `closeMeeting()` + open/close time-window enforcement
-7. QR rendering, edge-state handling (missing token, invalid token, closed meeting), polish
+There is no test suite. Syntax-check before shipping: `node --check` on `Code.gs` (copy to a `.js` name first) and on the script block extracted from `index.html`. A mock can't reproduce Sheets' real quirks (date coercion, format-ignoring appends), so smoke-test against the live sheet after deploying meaningful `Code.gs` changes — create a throwaway meeting, check in, delete the tab and index row.
 
 ## Deployment
 
