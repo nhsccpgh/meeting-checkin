@@ -130,6 +130,11 @@ test('doGet reports a time-expired meeting as closed even though Status still sa
   assert.equal(get(api, { token: 'tok-1', action: 'meta' }).status, 'closed');
 });
 
+test('action=version reports the baked deploy marker', () => {
+  const { api } = loadCode();
+  assert.deepEqual(get(api, { action: 'version' }), { ok: true, version: 'dev' });
+});
+
 test('doGet errors: no parameters, missing token, unknown token', () => {
   const { api } = loadCode();
   assert.equal(parse(api.doGet(undefined)).error, 'No request parameters');

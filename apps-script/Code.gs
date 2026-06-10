@@ -3,6 +3,11 @@ const CHECKIN_PAGE_URL = 'https://meetings.nhscc.com';
 const MEETINGS_TAB = 'Meetings';
 const MEMBERS_TAB  = 'Members';
 
+// Overwritten with the git short hash by deploy.sh at deploy time (the local
+// file is restored afterward). 'dev' in a live response means the code was
+// pushed outside ./deploy.sh.
+const DEPLOY_VERSION = 'dev';
+
 // 1-based column positions in the Members directory tab.
 // Synced from the timing-software CSV export via NHSCC → Sync Members.
 const MCOL = {
@@ -30,8 +35,8 @@ const COL = {
 
 // ── One-time setup ────────────────────────────────────────────────────────────
 
-// Run once from the Apps Script editor (Run → setup) after pasting this file.
-// Safe to run again — will not overwrite existing data.
+// Run once from the Apps Script editor (Run → setup) after the first clasp
+// push. Safe to run again — will not overwrite existing data.
 function setup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(MEETINGS_TAB);
@@ -378,6 +383,11 @@ function doPost(e) {
 function doGet(e) {
   try {
     if (!e || !e.parameter) return jsonResponse({ ok: false, error: 'No request parameters' });
+
+    // Deployed-version marker for deploy.sh's post-deploy verification.
+    if (e.parameter.action === 'version') {
+      return jsonResponse({ ok: true, version: DEPLOY_VERSION });
+    }
 
     // Member directory for the check-in typeahead (names only — no barcodes leave
     // the server). Requires an open meeting's token so the directory can't be
