@@ -592,7 +592,7 @@ async function submitCheckin() {
       headers: { 'Content-Type': 'text/plain' },
       // memberIndex lets the server grab the exact barcode when a name was picked
       // from the list; the server also falls back to name matching if it's absent.
-      body:    JSON.stringify({ token, name, source, memberIndex: selectedMember ? selectedMember.i : null }),
+      body:    JSON.stringify({ token, name, source, memberIndex: selectedMember ? selectedMember.i : null, device: deviceId() }),
     });
     const data = await res.json();
 
@@ -621,6 +621,23 @@ async function submitCheckin() {
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
+
+// Random per-browser tag sent with check-ins, so the points admin can spot one
+// device checking in several people. An audit correlation, not an identity —
+// clearing browser data resets it, and that's fine.
+function deviceId() {
+  try {
+    let id = localStorage.getItem('nhscc-device');
+    if (!id) {
+      id = crypto.randomUUID ? crypto.randomUUID()
+                             : Date.now().toString(36) + Math.random().toString(36).slice(2);
+      localStorage.setItem('nhscc-device', id);
+    }
+    return id;
+  } catch (_) {
+    return ''; // storage blocked — the check-in still works, just untagged
+  }
+}
 
 function esc(str) {
   return String(str ?? '').replace(/[&<>"']/g, c => ({

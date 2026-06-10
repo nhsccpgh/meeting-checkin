@@ -460,6 +460,9 @@ function doPost(e) {
     const finalName = match ? match.name : name;
     const barcode   = match ? match.barcode : '';
     const uniqueId  = match ? match.uniqueId : '';
+    // Per-browser audit tag (see deviceId() in index.html). Self-reported, so
+    // sanitize hard; absent is fine (old cached pages, blocked storage, curl).
+    const device = String(body.device || '').replace(/[^\w-]/g, '').slice(0, 64);
 
     const lock = LockService.getScriptLock();
     lock.waitLock(10000);
@@ -486,6 +489,11 @@ function doPost(e) {
       meetingSheet.getRange(targetRow, 4, 1, 2).setNumberFormat('@');          // Barcode ID + Unique ID (preserve "083")
       meetingSheet.getRange(targetRow, 1, 1, 5)
         .setValues([[now, finalName.trim(), source, barcode, uniqueId]]);
+      // Device tag goes in column 7 — written separately so column 6 (Notes)
+      // is never touched by the system.
+      if (device) {
+        meetingSheet.getRange(targetRow, 7).setNumberFormat('@').setValue(device);
+      }
     } finally {
       lock.releaseLock();
     }
@@ -708,9 +716,10 @@ function newMeetingTab(ss, tabName) {
   const sheet = ss.insertSheet(tabName);
   // 'Notes' is intentionally left blank by the system — it's a free column for
   // the points master to annotate check-ins by hand.
-  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes']);
+  sheet.appendRow(['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes', 'Device']);
   sheet.setFrozenRows(1);
   sheet.getRange(1, 4, sheet.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
+  sheet.getRange(1, 7, sheet.getMaxRows()).setNumberFormat('@');    // Device
   sheet.setColumnWidth(6, 280); // Notes
   return sheet;
 }
@@ -841,10 +850,11 @@ function fixMeetingTab() {
   if (!tab) { ui.alert(`Tab "${meeting.tab}" not found.`); return; }
 
   // Normalize headers + formatting.
-  tab.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes']]);
+  tab.getRange(1, 1, 1, 7).setValues([['Timestamp', 'Name', 'Source', 'Barcode ID', 'Unique ID', 'Notes', 'Device']]);
   tab.setFrozenRows(1);
   tab.getRange(2, 1, Math.max(tab.getMaxRows() - 1, 1), 1).setNumberFormat('M/d/yyyy H:mm:ss'); // reveal stored time
   tab.getRange(1, 4, tab.getMaxRows(), 2).setNumberFormat('@'); // Barcode ID + Unique ID
+  tab.getRange(1, 7, tab.getMaxRows()).setNumberFormat('@');    // Device
 
   const last = tab.getLastRow();
   if (last < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
@@ -881,17 +891,27 @@ function showAttendance() {
   const tab = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(meeting.tab);
   if (!tab || tab.getLastRow() < 2) { ui.alert(`No check-ins recorded for "${meeting.name}".`); return; }
 
-  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID, Unique ID
+  const rows     = tab.getDataRange().getDisplayValues(); // Timestamp, Name, Source, Barcode ID, Unique ID, Notes, Device
   const matched   = [];
   const unmatched = [];
+  const byDevice  = {};
   for (let i = 1; i < rows.length; i++) {
     const name     = String(rows[i][1] || '').trim();
     const barcode  = String(rows[i][3] || '').trim();
     const uniqueId = String(rows[i][4] || '').trim();
+    const device   = String(rows[i][6] || '').trim();
     if (!name) continue;
     if (barcode || uniqueId) matched.push({ barcode, uniqueId, name });
     else                     unmatched.push(name);
+    if (device) (byDevice[device] = byDevice[device] || []).push(name);
   }
+
+  // One browser checking in several people is worth a look — could be a shared
+  // family phone, could be a Zoom prankster. Flag it, don't block it.
+  const sharedDevices = Object.keys(byDevice).filter(d => byDevice[d].length > 1);
+  const sharedHtml = sharedDevices.length
+    ? `<p style="margin-top:14px;color:#b8400a"><strong>Same device checked in multiple people:</strong><br>${sharedDevices.map(d => `${esc_(d.slice(0, 8))}…: ${esc_(byDevice[d].join(', '))}`).join('<br>')}</p>`
+    : '';
 
   matched.sort((a, b) => a.barcode.localeCompare(b.barcode, undefined, { numeric: true }));
   const barcodeText = ['Barcode\tUnique ID\tName']
@@ -908,6 +928,7 @@ function showAttendance() {
   <textarea readonly style="width:100%;height:240px;font-family:monospace;font-size:13px"
             onclick="this.select()">${esc_(barcodeText)}</textarea>
   ${unmatchedHtml}
+  ${sharedHtml}
 </body></html>`).setWidth(420).setHeight(460);
 
   ui.showModalDialog(html, 'Attendance');

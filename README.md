@@ -55,7 +55,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 | `bulkCreateMeetings()` | Checkbox picker over the next 18 months — creates the standing monthly meetings (3rd Wednesday, sign-ins 7–9 PM, named "Month Year"), skipping months that already exist or have passed |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
 | `reopenMeeting()` | Reopens a closed meeting — re-issues the backup code if another open meeting took it, and clears a passed Closes At time |
-| `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
+| `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin — and flags multiple check-ins from the same device |
 | `fixMeetingTab()` | Repairs an existing meeting tab — fixes ID text formatting and re-pulls each check-in's barcode/Unique ID from the Members directory by name |
 | `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
 | `syncMembers()` | Fetches the timing-software CSV export from a (remembered, re-promptable) URL and rewrites the Members tab |
@@ -75,7 +75,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 
 Synced from the timing-software CSV export (`UniqueID, Barcode, CarID, FirstName, LastName`). Only those identity columns are pulled in — the export's PII columns (address, email, phone) are ignored. The export URL changes per export (dated filename), so **Sync Members** prompts for it and remembers the last one used.
 
-One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID, Notes. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form. `Notes` is never written by the system — it's a free column for the points master to annotate by hand.
+One additional tab is auto-created per meeting with columns: Timestamp, Name, Source, Barcode ID, Unique ID, Notes, Device. The ID columns are text-formatted so values like `083` or `ALBERS-MARK` keep their exact form. `Notes` is never written by the system — it's a free column for the points master to annotate by hand. `Device` is a random per-browser tag so **Show Attendance** can flag several names checked in from one device (a nudge for the points admin, not a block — families legitimately share a phone).
 
 ---
 

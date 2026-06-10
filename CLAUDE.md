@@ -32,7 +32,7 @@ Three independent components with no shared build toolchain:
 ### 3. Google Sheet (datastore)
 - `Meetings` tab (index): Token, Meeting Name, Tab Name, Status, Opens At, Closes At, Created At, Check-in URL, Code
 - `Members` tab (directory): Unique ID, Barcode, Name — rewritten by Sync Members from the timing-software CSV (`UniqueID, Barcode, CarID, FirstName, LastName`); PII columns from the export are deliberately not imported; not edited by hand
-- One auto-created tab per meeting: Timestamp, Name, Source (`In person` or `Zoom`), Barcode ID, Unique ID, Notes. `Notes` is never written by the system — it's the points admin's free annotation column
+- One auto-created tab per meeting: Timestamp, Name, Source (`In person` or `Zoom`), Barcode ID, Unique ID, Notes, Device. `Notes` is never written by the system — it's the points admin's free annotation column (`doPost` writes columns 1–5 and 7 separately to keep it that way). `Device` is a random per-browser tag (localStorage `nhscc-device`) so Show Attendance can flag one device checking in several people — an audit hint, not identity, and deliberately record-don't-block (families legitimately share a phone). Client IPs are NOT obtainable in Apps Script; don't try.
 - The club's points tracker reads this sheet directly
 
 ## Implementation gotchas
