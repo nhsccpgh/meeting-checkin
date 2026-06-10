@@ -60,7 +60,7 @@ Deployed as a Web App via `./deploy.sh` ("Execute as: me", "Who has access: Anyo
 | `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
 | `syncMembers()` | Fetches the timing-software CSV export from a (remembered, re-promptable) URL and rewrites the Members tab |
 | `discordAnnouncements()` | Stores a Discord webhook URL and installs the auto-close trigger; type DISABLE to turn off |
-| `closeExpiredMeetings()` | Time trigger (every 15 min): flips meetings past their Closes At to `closed` and announces the attendance summary to Discord |
+| `closeExpiredMeetings()` | Time trigger (every 15 min): posts a reminder with the check-in link + backup code in the hour before a meeting opens, then flips meetings past their Closes At to `closed` and announces the attendance summary to Discord |
 | `setup()` | One-time setup — creates the Meetings index and Members directory tabs with headers |
 
 ### Google Sheet (datastore)
@@ -83,7 +83,10 @@ One additional tab is auto-created per meeting with columns: Timestamp, Name, So
 
 ## Discord announcements (optional)
 
-When a meeting closes — manually or by its Closes At time — a summary can be posted to a Discord channel: meeting name, check-in counts (in person / Zoom), unmatched names to review, and a link to the attendance tab. Counts only; member names stay in the Sheet.
+Two automatic posts per meeting:
+
+- **About an hour before Opens At**: the check-in link and 4-digit backup code, so the board has them even if the organizer isn't there.
+- **When the meeting closes** — manually or by its Closes At time — a summary: meeting name, check-in counts (in person / Zoom), unmatched names to review, and a link to the attendance tab. Counts only; member names stay in the Sheet.
 
 1. In Discord: channel → **Edit Channel → Integrations → Webhooks → New Webhook**. Name it (e.g. "NHSCC Check-In"), optionally set the club logo as its avatar, and **Copy Webhook URL**.
 2. In the Sheet: **NHSCC → Discord Announcements**, paste the URL. A test message posts immediately and a 15-minute timer is installed that closes + announces meetings past their Closes At.

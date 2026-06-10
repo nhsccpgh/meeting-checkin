@@ -11,7 +11,7 @@ const parse = res => JSON.parse(res.getContent());
 const get   = (api, params) => parse(api.doGet({ parameter: params }));
 const post  = (api, body) => parse(api.doPost({ postData: { contents: JSON.stringify(body) } }));
 
-const MEETINGS_HEADER = ['Token', 'Meeting Name', 'Tab Name', 'Status', 'Opens At', 'Closes At', 'Created At', 'Check-in URL', 'Code'];
+const MEETINGS_HEADER = ['Token', 'Meeting Name', 'Tab Name', 'Status', 'Opens At', 'Closes At', 'Created At', 'Check-in URL', 'Code', 'Reminder Sent'];
 
 function seedMeeting(ss, { token = 'tok-1', name = 'June 2026', tab = 'June 2026', status = 'open', opensAt = '', closesAt = '', code = '1234' } = {}) {
   let sheet = ss.getSheetByName('Meetings');
@@ -399,6 +399,41 @@ test('postToDiscord_ retries through a 429 rate limit and reports the final stat
   fetchResults.push(429, 429, 429); // persistently rate-limited
   assert.equal(api.postToDiscord_('hello again'), 429, 'gives up after 3 attempts and reports it');
   assert.equal(fetches.length, 5);
+});
+
+test('the janitor posts a reminder with link and code in the hour before a meeting opens, once', () => {
+  const { api, ss, props, fetches } = loadCode();
+  props.set('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/test');
+
+  const soon = new Date(Date.now() + 30 * 60 * 1000); // opens in 30 minutes
+  seedMeeting(ss, { token: 'soon-tok', name: 'June 2026', tab: 'June 2026', opensAt: soon, closesAt: future(), code: '4242' });
+  seedMeeting(ss, { token: 'later-tok', tab: 'T2', opensAt: new Date(Date.now() + 3 * 3600 * 1000), code: '5555' });
+
+  api.closeExpiredMeetings();
+
+  assert.equal(fetches.length, 1, 'only the imminent meeting is announced');
+  const content = JSON.parse(fetches[0].opts.payload).content;
+  assert.ok(content.includes('June 2026'));
+  assert.ok(content.includes('4242'), 'includes the backup code');
+  assert.ok(content.includes('soon-tok'), 'includes the check-in link');
+  assert.ok(ss.getSheetByName('Meetings').data[1][9] instanceof Date, 'Reminder Sent is stamped');
+
+  api.closeExpiredMeetings();
+  assert.equal(fetches.length, 1, 'no duplicate reminder on the next run');
+});
+
+test('a rate-limited reminder is not marked sent, so the next run retries it', () => {
+  const { api, ss, props, fetches, fetchResults } = loadCode();
+  props.set('DISCORD_WEBHOOK_URL', 'https://discord.com/api/webhooks/test');
+  seedMeeting(ss, { opensAt: new Date(Date.now() + 30 * 60 * 1000), closesAt: future() });
+
+  fetchResults.push(429, 429, 429); // Discord rejects all three attempts
+  api.closeExpiredMeetings();
+  assert.equal(ss.getSheetByName('Meetings').data[1][9] ?? '', '', 'not marked sent');
+
+  api.closeExpiredMeetings(); // next 15-min run, Discord healthy again
+  assert.equal(fetches.length, 4);
+  assert.ok(ss.getSheetByName('Meetings').data[1][9] instanceof Date);
 });
 
 test('closeExpiredMeetings without a webhook closes silently', () => {

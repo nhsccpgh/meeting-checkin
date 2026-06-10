@@ -31,6 +31,7 @@ const COL = {
   CREATED_AT:   7,
   CHECKIN_URL:  8,
   CODE:         9,
+  REMINDED:     10, // when the pre-meeting Discord reminder was posted
 };
 
 // ── One-time setup ────────────────────────────────────────────────────────────
@@ -53,6 +54,9 @@ function setup() {
     // Existing sheet from before the backup-code feature — add the header.
     sheet.getRange(1, COL.CODE).setValue('Code');
   }
+  if (!sheet.getRange(1, COL.REMINDED).getValue()) {
+    sheet.getRange(1, COL.REMINDED).setValue('Reminder Sent');
+  }
   // Force text format on columns Sheets would otherwise mangle:
   // Meeting Name / Tab Name ("May 2026" → Date) and Code (preserves leading style).
   sheet.getRange(1, COL.MEETING_NAME, sheet.getMaxRows()).setNumberFormat('@');
@@ -61,6 +65,7 @@ function setup() {
   // Show times on the meeting windows (dates written via setValues display
   // date-only otherwise). Covers Opens At, Closes At, Created At.
   sheet.getRange(1, COL.OPENS_AT, sheet.getMaxRows(), 3).setNumberFormat('M/d/yyyy H:mm');
+  sheet.getRange(1, COL.REMINDED, sheet.getMaxRows()).setNumberFormat('M/d/yyyy H:mm');
 
   // Members directory — populated by NHSCC → Sync Members from the CSV export.
   let members = ss.getSheetByName(MEMBERS_TAB);
@@ -851,10 +856,14 @@ function discordAnnouncements() {
   }
 }
 
-// Time-driven janitor (installed by Discord Announcements): flips meetings
-// whose Closes At has passed from 'open' to 'closed' — which also tidies the
-// index — and announces each one. Safe without a webhook: it closes silently.
+// Time-driven janitor (installed by Discord Announcements, runs every 15 min).
+// Two jobs: post the pre-meeting reminder, and flip meetings whose Closes At
+// has passed from 'open' to 'closed' — which also tidies the index — and
+// announce each one. Safe without a webhook: it closes silently.
+// (Keeps this name even though it now does more — the installed trigger
+// references the function by name.)
 function closeExpiredMeetings() {
+  announceUpcomingMeetings_();
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(MEETINGS_TAB);
   if (!sheet) return;
@@ -869,6 +878,42 @@ function closeExpiredMeetings() {
     CacheService.getScriptCache().remove('roster:' + data[i][COL.TOKEN - 1]);
     announceClosedMeeting_(display[i][COL.MEETING_NAME - 1], display[i][COL.TAB_NAME - 1]);
   }
+}
+
+// Post the check-in link + backup code to Discord up to an hour before a
+// meeting opens, so the board has them even when the organizer isn't around.
+// The Reminder Sent cell is the dedupe marker — stamped only after Discord
+// accepts the post, so a failed post retries on the next trigger run.
+function announceUpcomingMeetings_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
+  if (!sheet) return;
+  const range   = sheet.getDataRange();
+  const data    = range.getValues();
+  const display = range.getDisplayValues();
+  const now = new Date();
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][COL.STATUS - 1] !== 'open') continue;
+    if (data[i][COL.REMINDED - 1]) continue; // already announced
+    const raw   = data[i][COL.OPENS_AT - 1];
+    const opens = raw instanceof Date ? raw : (raw ? new Date(raw) : null);
+    if (!opens || isNaN(opens.getTime())) continue;
+    const msUntilOpen = opens - now;
+    if (msUntilOpen <= 0 || msUntilOpen > 60 * 60 * 1000) continue; // only the hour before
+
+    const msg = `📣 **${display[i][COL.MEETING_NAME - 1]}** check-in opens at ${timeOfDay_(opens)}.\n` +
+      `Link: <${display[i][COL.CHECKIN_URL - 1]}>\n` +
+      `Backup code: **${display[i][COL.CODE - 1]}** — read it aloud for anyone who can’t scan the QR.`;
+    const status = postToDiscord_(msg);
+    if (status >= 200 && status < 300) {
+      sheet.getRange(i + 1, COL.REMINDED).setNumberFormat('M/d/yyyy H:mm').setValue(now);
+    }
+  }
+}
+
+// "7:00 PM" from a Date, using the script's timezone (V8 Dates already are).
+function timeOfDay_(d) {
+  const h12 = d.getHours() % 12 || 12;
+  return `${h12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
 }
 
 // Post the closed meeting's attendance summary. Counts only — names stay in
