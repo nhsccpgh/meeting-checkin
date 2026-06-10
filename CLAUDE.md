@@ -26,7 +26,7 @@ Three independent components with no shared build toolchain:
 - Deploy settings ("Execute as: me", "Who has access: Anyone") are codified in `apps-script/appsscript.json`
 - `doGet(e)` — returns meeting name, status, and check-ins as JSON (cached ~10s per token in CacheService); `action=meta` for metadata only; `action=resolve&code=NNNN` maps a backup code to a token (open meetings only); `action=members` returns directory names for the typeahead — **requires an open meeting's token** so the club roster can't be enumerated, and never includes barcodes
 - `doPost(e)` — validates token, status, and open/close time window; resolves the member (picked `memberIndex` first, normalized-name match as fallback, ambiguous names left unmatched); duplicate names return `ok: true, alreadyCheckedIn: true` (not an error); appends under a LockService lock, then busts the roster cache
-- Organizer menu (`onOpen`): New Meeting, Show QR, Close Meeting, Show Attendance (sorted barcodes for the points admin), Repair Barcodes (re-derives ID columns from the directory), Sync Members (imports the timing-software CSV from a remembered URL)
+- Organizer menu (`onOpen`): New Meeting, Show QR, Close Meeting, Reopen Meeting (undoes an accidental close — re-issues the backup code if reused, clears a passed Closes At), Show Attendance (sorted barcodes for the points admin), Repair Barcodes (re-derives ID columns from the directory), Sync Members (imports the timing-software CSV from a remembered URL)
 - `createMeeting()` — UUID token + unique 4-digit code; never reuses an existing tab (suffixes "(2)" instead — reuse would interleave two meetings' check-ins)
 
 ### 3. Google Sheet (datastore)
@@ -46,11 +46,14 @@ Three independent components with no shared build toolchain:
 - **Duplicated helpers**: `normName()` and the HTML-escape function exist in both `Code.gs` and `index.html` and must stay in sync — the server matches on its copy, the client filters on its own.
 - **Token security**: UUIDs stop guessing; open/close time windows limit sharing. The 4-digit code is brute-forceable by design tradeoff — it only resolves open meetings, so don't widen what it unlocks.
 - **Polling, not push**: Apps Script cannot push; the roster polls ~12s.
-- **closeMeeting vs closesAt**: a passed `Closes At` time blocks check-ins but does NOT flip Status to `closed` — the index row stays `open` until Close Meeting is used.
+- **Status vs closesAt**: a passed `Closes At` blocks check-ins, hides the meeting from `action=resolve` and Show QR, and makes `doGet` report `closed` (all via `isMeetingOpen`) — but the Status cell stays `open` until Close Meeting flips it. Close Meeting deliberately lists those expired-but-open rows so they can be tidied up.
+- **Typeahead Enter ordering**: `wireTypeahead()`'s keydown listener must stay registered before `renderForm`'s submit-on-Enter listener — it consumes Enter with `stopImmediatePropagation()` when a suggestion is highlighted.
 
 ## Testing
 
-There is no test suite. Syntax-check before shipping: `node --check` on `Code.gs` (copy to a `.js` name first) and on the script block extracted from `index.html`. A mock can't reproduce Sheets' real quirks (date coercion, format-ignoring appends), so smoke-test against the live sheet after deploying meaningful `Code.gs` changes — create a throwaway meeting, check in, delete the tab and index row.
+- `node --test tests/*.test.js` runs the unit suite. `tests/gas-mocks.js` evaluates `Code.gs` in a vm sandbox against in-memory mocks of SpreadsheetApp/LockService/CacheService/ContentService; `tests/code.test.js` covers `doPost`/`doGet`, member matching, code resolution, time windows, and cache busting. Menu/dialog functions (anything touching `getUi()`) are untested by design.
+- CI (`.github/workflows/ci.yml`) runs the suite plus `node --check` syntax checks on both files on every push.
+- The mocks deliberately do NOT reproduce Sheets' quirks (date coercion, format-ignoring appends, vm-realm arrays are normalized in `appendRow`) — after meaningful `Code.gs` changes, still smoke-test against the live sheet: create a throwaway meeting, check in, delete the tab and index row.
 
 ## Deployment
 

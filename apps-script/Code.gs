@@ -77,6 +77,7 @@ function onOpen() {
     .addItem('New Meeting',     'createMeeting')
     .addItem('Show QR',         'showQR')
     .addItem('Close Meeting',   'closeMeeting')
+    .addItem('Reopen Meeting',  'reopenMeeting')
     .addSeparator()
     .addItem('Show Attendance', 'showAttendance')
     .addItem('Repair Barcodes', 'fixMeetingTab')
@@ -142,11 +143,15 @@ function closeMeeting() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
   if (!sheet) { ui.alert('Meetings tab not found.'); return; }
 
-  const data = sheet.getDataRange().getValues();
+  // Status-only filter (no closesAt check) so a time-expired meeting can still
+  // be tidied up to 'closed' here.
+  const range   = sheet.getDataRange();
+  const data    = range.getValues();
+  const display = range.getDisplayValues();
   const open = [];
   for (let i = 1; i < data.length; i++) {
     if (data[i][COL.STATUS - 1] === 'open') {
-      open.push({ row: i + 1, name: data[i][COL.MEETING_NAME - 1] });
+      open.push({ row: i + 1, name: display[i][COL.MEETING_NAME - 1], token: data[i][COL.TOKEN - 1] });
     }
   }
 
@@ -167,7 +172,67 @@ function closeMeeting() {
   }
 
   sheet.getRange(open[idx].row, COL.STATUS).setValue('closed');
+  CacheService.getScriptCache().remove('roster:' + open[idx].token); // phones see the close on the next poll
   ui.alert(`"${open[idx].name}" is now closed.`);
+}
+
+function reopenMeeting() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
+  if (!sheet) { ui.alert('Meetings tab not found.'); return; }
+
+  const range   = sheet.getDataRange();
+  const data    = range.getValues();
+  const display = range.getDisplayValues();
+  const closed = [];
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][COL.STATUS - 1] === 'closed') {
+      closed.push({
+        row:      i + 1,
+        name:     display[i][COL.MEETING_NAME - 1],
+        token:    data[i][COL.TOKEN - 1],
+        code:     String(display[i][COL.CODE - 1]).trim(),
+        closesAt: data[i][COL.CLOSES_AT - 1],
+      });
+    }
+  }
+
+  if (closed.length === 0) { ui.alert('No closed meetings.'); return; }
+
+  const list = closed.map((m, i) => `${i + 1}. ${m.name}`).join('\n');
+  const result = ui.prompt(
+    'Reopen Meeting',
+    `Closed meetings:\n${list}\n\nEnter the number to reopen:`,
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+
+  const idx = parseInt(result.getResponseText().trim(), 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= closed.length) { ui.alert('Invalid selection.'); return; }
+  const meeting = closed[idx];
+  const notes = [];
+
+  // Backup codes are only unique among open meetings, so this one's code may
+  // have been reused while it was closed — issue a fresh one if so.
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][COL.STATUS - 1] === 'open' && String(display[i][COL.CODE - 1]).trim() === meeting.code) {
+      const newCode = generateMeetingCode();
+      sheet.getRange(meeting.row, COL.CODE).setValue(newCode);
+      notes.push(`Its backup code was taken by another open meeting — new code: ${newCode}`);
+      break;
+    }
+  }
+
+  // A passed Closes At would keep rejecting check-ins despite the reopen.
+  const closes = meeting.closesAt instanceof Date ? meeting.closesAt : (meeting.closesAt ? new Date(meeting.closesAt) : null);
+  if (closes && !isNaN(closes.getTime()) && new Date() > closes) {
+    sheet.getRange(meeting.row, COL.CLOSES_AT).setValue('');
+    notes.push('Its Closes At time had already passed and was cleared — close it manually when done.');
+  }
+
+  sheet.getRange(meeting.row, COL.STATUS).setValue('open');
+  CacheService.getScriptCache().remove('roster:' + meeting.token);
+  ui.alert(`"${meeting.name}" is open again.` + (notes.length ? '\n\n' + notes.join('\n') : ''));
 }
 
 function showQR() {
@@ -175,14 +240,16 @@ function showQR() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
   if (!sheet) { ui.alert('Meetings tab not found.'); return; }
 
-  const data = sheet.getDataRange().getDisplayValues();
+  const range   = sheet.getDataRange();
+  const data    = range.getValues();
+  const display = range.getDisplayValues();
   const open = [];
   for (let i = 1; i < data.length; i++) {
-    if (data[i][COL.STATUS - 1] === 'open') {
+    if (isMeetingOpen(data[i])) { // skips time-expired meetings, not just closed ones
       open.push({
-        name: data[i][COL.MEETING_NAME - 1],
-        url:  data[i][COL.CHECKIN_URL - 1],
-        code: data[i][COL.CODE - 1],
+        name: display[i][COL.MEETING_NAME - 1],
+        url:  display[i][COL.CHECKIN_URL - 1],
+        code: display[i][COL.CODE - 1],
       });
     }
   }
@@ -210,7 +277,7 @@ function meetingDialogHtml(name, url, code) {
   return HtmlService.createHtmlOutput(`<!DOCTYPE html>
 <html>
 <body style="font-family:sans-serif;padding:16px;margin:0">
-  <h3 style="margin-top:0">${name}</h3>
+  <h3 style="margin-top:0">${esc_(name)}</h3>
   <p style="word-break:break-all"><strong>Check-in URL:</strong><br>
     <a href="${url}" target="_blank">${url}</a>
   </p>
@@ -347,7 +414,10 @@ function doGet(e) {
     const meeting = findMeeting(token);
     if (!meeting) return jsonResponse({ ok: false, error: 'Unknown meeting' });
 
-    const [, meetingName, tabName, status] = meeting.data;
+    let [, meetingName, tabName, status] = meeting.data;
+    // A passed Closes At means closed, even though the Status cell still says
+    // 'open' — keeps the page from offering a form that doPost would reject.
+    if (status === 'open' && !isMeetingOpen(meeting.data)) status = 'closed';
 
     if (e.parameter.action === 'meta') {
       return jsonResponse({ ok: true, meetingName, status });
@@ -397,19 +467,31 @@ function findMeeting(token) {
   return null;
 }
 
-// Look up an open meeting by its 6-digit backup code. Returns { token } or null.
-// Only matches open meetings, so a code freed by a closed meeting can be reused safely.
+// True if a Meetings index row is accepting check-ins right now: Status is
+// 'open' AND the Closes At time (if any) hasn't passed. Expects a getValues()
+// row, where Closes At is a Date (or '' when blank). An unparseable Closes At
+// is treated as no close time rather than locking the meeting shut.
+function isMeetingOpen(rowValues, now) {
+  if (rowValues[COL.STATUS - 1] !== 'open') return false;
+  const raw    = rowValues[COL.CLOSES_AT - 1];
+  const closes = raw instanceof Date ? raw : (raw ? new Date(raw) : null);
+  if (!closes || isNaN(closes.getTime())) return true;
+  return (now || new Date()) <= closes;
+}
+
+// Look up an open meeting by its 4-digit backup code. Returns { token } or null.
+// Only matches meetings still accepting check-ins (open status AND inside the
+// close window), so a code freed by a closed or expired meeting is safe to reuse.
 function findMeetingByCode(code) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(MEETINGS_TAB);
   if (!sheet) return null;
-  // Single read: token, status, and code are all plain strings, so the
-  // display values are sufficient (no need for a second getValues() call).
-  const display = sheet.getDataRange().getDisplayValues();
-  const wanted  = String(code).trim();
-  for (let i = 1; i < display.length; i++) {
-    if (display[i][COL.STATUS - 1] === 'open' &&
-        String(display[i][COL.CODE - 1]).trim() === wanted) {
-      return { token: display[i][COL.TOKEN - 1] };
+  // Token, status, and code are all text-formatted, so getValues() returns the
+  // exact strings — and Closes At comes back as a real Date for isMeetingOpen.
+  const data   = sheet.getDataRange().getValues();
+  const wanted = String(code).trim();
+  for (let i = 1; i < data.length; i++) {
+    if (isMeetingOpen(data[i]) && String(data[i][COL.CODE - 1]).trim() === wanted) {
+      return { token: data[i][COL.TOKEN - 1] };
     }
   }
   return null;

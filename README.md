@@ -49,6 +49,7 @@ Deployed from [script.google.com](https://script.google.com) as a Web App ("Exec
 | `onOpen()` | Adds the **NHSCC** custom menu to the spreadsheet |
 | `createMeeting()` | Prompts for name and optional open/close times, generates a UUID token and a unique 4-digit code, creates the per-meeting tab, and shows the QR code + code dialog |
 | `closeMeeting()` | Sets a meeting's status to `closed`; subsequent check-ins are rejected |
+| `reopenMeeting()` | Reopens a closed meeting — re-issues the backup code if another open meeting took it, and clears a passed Closes At time |
 | `showAttendance()` | Shows a meeting's present barcode IDs (sorted) plus any unmatched names, for the points admin |
 | `fixMeetingTab()` | Repairs an existing meeting tab — fixes ID text formatting and re-pulls each check-in's barcode/Unique ID from the Members directory by name |
 | `matchMember()` | Resolves a check-in to a member barcode via the picked row index or a normalized full-name match |
@@ -73,6 +74,13 @@ One additional tab is auto-created per meeting with columns: Timestamp, Name, So
 
 ---
 
+## Development
+
+- `node --test tests/*.test.js` runs the unit suite — `Code.gs` is evaluated in a sandbox against in-memory mocks of the Apps Script services (`tests/gas-mocks.js`).
+- GitHub Actions (`.github/workflows/ci.yml`) runs the tests plus `node --check` syntax checks on every push.
+
+---
+
 ## Setup (first time)
 
 1. Create a new Google Sheet for the club.
@@ -88,7 +96,7 @@ One additional tab is auto-created per meeting with columns: Timestamp, Name, So
 2. Enter the meeting name (e.g. `May 2026 Autocross`).
 3. Optionally enter open/close times (MM/DD/YYYY HH:MM). Leave blank to open immediately / close manually.
 4. Copy the URL from the dialog and paste it into Zoom chat. Project the QR code for in-person members, and read the 4-digit backup code aloud for anyone who can't scan it.
-5. When sign-in is complete, use **NHSCC → Close Meeting**.
+5. When sign-in is complete, use **NHSCC → Close Meeting**. (Closed by mistake? **NHSCC → Reopen Meeting** undoes it.)
 
 ---
 
